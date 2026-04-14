@@ -1,0 +1,81 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  
+  --color-primary: #1b4332;
+  --color-secondary: #2d6a4f;
+  --color-accent: #ffb703;
+  --color-surface: #ffffff;
+  --color-background: #f4f7f6;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-primary font-sans antialiased overflow-x-hidden;
+    min-height: 100vh;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display;
+  }
+}
+
+@utility bento-card {
+  @apply bg-surface rounded-[2rem] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100/50 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)];
+}
+
+@utility glass-nav {
+  @apply bg-white/80 backdrop-blur-xl border-t border-gray-100/50 shadow-[0_-8px_30px_rgb(0,0,0,0.04)];
+}
+
+@utility primary-gradient {
+  @apply bg-gradient-to-br from-[#1b4332] to-[#2d6a4f];
+}
+
+@utility accent-button {
+  @apply bg-accent text-primary font-bold px-6 py-3 rounded-2xl shadow-lg shadow-accent/20 hover:scale-105 active:scale-95 transition-all;
+}
+
+@utility status-badge {
+  @apply text-[10px] px-3 py-1 rounded-full uppercase font-bold tracking-wider;
+}
+
+@utility stat-card {
+  @apply bg-white rounded-3xl p-4 flex flex-col items-center justify-center text-center shadow-sm border border-gray-50;
+}
+
+@utility quick-action-btn {
+  @apply bg-white rounded-3xl p-4 flex flex-col items-center justify-center gap-2 shadow-sm border border-gray-50 hover:bg-gray-50 transition-colors;
+}
+
+@utility progress-bar-container {
+  @apply w-full h-2 bg-gray-100 rounded-full overflow-hidden;
+}
+
+@utility progress-bar-fill {
+  @apply h-full transition-all duration-500;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-primary/10 rounded-full hover:bg-primary/20;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

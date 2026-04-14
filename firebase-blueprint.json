@@ -1,0 +1,289 @@
+{
+  "entities": {
+    "Animal": {
+      "title": "Animal",
+      "description": "Registro individual de cada animal.",
+      "type": "object",
+      "properties": {
+        "id_arete": { "type": "string", "description": "Identificador único" },
+        "nombre": { "type": "string" },
+        "sexo": { "type": "string", "enum": ["M", "H"] },
+        "fecha_nacimiento": { "type": "string", "format": "date" },
+        "id_raza": { "type": "string" },
+        "id_categoria": { "type": "string" },
+        "id_propietario": { "type": "string" },
+        "id_potrero": { "type": "string" },
+        "photoUrl": { "type": "string", "description": "URL de la foto con marca de agua" },
+        "padreId": { "type": "string", "description": "ID del padre para árbol genealógico" },
+        "madreId": { "type": "string", "description": "ID de la madre para árbol genealógico" }
+      },
+      "required": ["id_arete", "nombre", "sexo", "fecha_nacimiento"]
+    },
+    "Raza": {
+      "title": "Raza",
+      "description": "Catálogo de razas.",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "descripcion": { "type": "string" }
+      }
+    },
+    "Finca": {
+      "title": "Finca",
+      "description": "Ubicación de la finca.",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "ubicacion": { "type": "string", "description": "Coordenadas o dirección" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" }
+      }
+    },
+    "Potrero": {
+      "title": "Potrero",
+      "description": "Áreas dentro de la finca.",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "id_finca": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "userId": { "type": "string" }
+      }
+    },
+    "Salud": {
+      "title": "Salud",
+      "description": "Historial médico.",
+      "type": "object",
+      "properties": {
+        "id_animal": { "type": "string" },
+        "fecha_evento": { "type": "string", "format": "date" },
+        "tipo_evento": { "type": "string" },
+        "descripcion": { "type": "string" }
+      }
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Alertas para el usuario.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["health", "birth", "feed"] },
+        "read": { "type": "boolean" }
+      }
+    },
+    "HealthEvent": {
+      "title": "HealthEvent",
+      "description": "Registro de evento de salud.",
+      "type": "object",
+      "properties": {
+        "animalId": { "type": "string" },
+        "animalName": { "type": "string" },
+        "animalArete": { "type": "string" },
+        "type": { "type": "string" },
+        "description": { "type": "string" },
+        "cost": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      }
+    },
+    "FeedingRecord": {
+      "title": "FeedingRecord",
+      "description": "Registro de alimentación.",
+      "type": "object",
+      "properties": {
+        "potreroId": { "type": "string" },
+        "potreroNombre": { "type": "string" },
+        "foodType": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      }
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil del usuario y datos del rancho.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "ranchName": { "type": "string" },
+        "curp": { "type": "string", "description": "Clave Única de Registro de Población" },
+        "rfc": { "type": "string", "description": "Registro Federal de Contribuyentes" },
+        "upp": { "type": "string", "description": "Unidad de Producción Pecuaria" },
+        "state": { "type": "string" },
+        "municipality": { "type": "string" },
+        "isPublic": { "type": "boolean", "description": "Si el perfil es visible en la comunidad" },
+        "rating": { "type": "number", "description": "Calificación promedio" },
+        "reviewCount": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Insumos, medicinas o alimento en bodega.",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "cantidad": { "type": "number" },
+        "unidad": { "type": "string" },
+        "minimo": { "type": "number", "description": "Stock mínimo para alerta" },
+        "userId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Tarea programada en el calendario.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["vacuna", "desparasitacion", "parto", "otro"] },
+        "completed": { "type": "boolean" },
+        "userId": { "type": "string" }
+      }
+    },
+    "MarketplaceOffer": {
+      "title": "MarketplaceOffer",
+      "description": "Oferta pública de venta de un animal.",
+      "type": "object",
+      "properties": {
+        "animalId": { "type": "string" },
+        "animalName": { "type": "string" },
+        "animalArete": { "type": "string" },
+        "price": { "type": "number" },
+        "description": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "sellerName": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Reseña de un ganadero.",
+      "type": "object",
+      "properties": {
+        "targetUserId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Conversación entre dos ganaderos.",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "lastMessage": { "type": "string" },
+        "lastMessageDate": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Mensaje individual en un chat.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ReproductionEvent": {
+      "title": "ReproductionEvent",
+      "description": "Registro de evento reproductivo.",
+      "type": "object",
+      "properties": {
+        "animalId": { "type": "string" },
+        "animalName": { "type": "string" },
+        "type": { "type": "string", "enum": ["Inseminación", "Palpación", "Parto", "Celo"] },
+        "date": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" },
+        "result": { "type": "string" },
+        "userId": { "type": "string" }
+      }
+    },
+    "ProductionRecord": {
+      "title": "ProductionRecord",
+      "description": "Registro de producción (leche/carne).",
+      "type": "object",
+      "properties": {
+        "animalId": { "type": "string" },
+        "animalName": { "type": "string" },
+        "type": { "type": "string", "enum": ["Leche", "Carne"] },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      }
+    },
+    "FinanceTransaction": {
+      "title": "FinanceTransaction",
+      "description": "Registro de transacciones financieras.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["Venta", "Compra", "Ingreso", "Egreso"] },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "animalId": { "type": "string" },
+        "userId": { "type": "string" }
+      }
+    },
+    "AnimalTransfer": {
+      "title": "AnimalTransfer",
+      "description": "Propuesta de transferencia de propiedad de un animal.",
+      "type": "object",
+      "properties": {
+        "animalId": { "type": "string" },
+        "animalName": { "type": "string" },
+        "animalArete": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "sellerName": { "type": "string" },
+        "buyerId": { "type": "string" },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "price": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["animalId", "sellerId", "buyerId", "status", "participants"]
+    }
+  },
+  "firestore": {
+    "/animals": { "schema": "Animal", "description": "Colección de animales" },
+    "/razas": { "schema": "Raza", "description": "Colección de razas" },
+    "/fincas": { "schema": "Finca", "description": "Colección de fincas" },
+    "/potreros": { "schema": "Potrero", "description": "Colección de potreros" },
+    "/salud": { "schema": "Salud", "description": "Colección de salud" },
+    "/notifications": { "schema": "Notification", "description": "Colección de notificaciones" },
+    "/health_events": { "schema": "HealthEvent", "description": "Colección de eventos de salud" },
+    "/feeding_records": { "schema": "FeedingRecord", "description": "Colección de registros de alimentación" },
+    "/users": { "schema": "UserProfile", "description": "Colección de perfiles de usuario" },
+    "/reproduction_events": { "schema": "ReproductionEvent", "description": "Colección de eventos reproductivos" },
+    "/production_records": { "schema": "ProductionRecord", "description": "Colección de registros de producción" },
+    "/finance_transactions": { "schema": "FinanceTransaction", "description": "Colección de transacciones financieras" },
+    "/chats": { "schema": "Chat", "description": "Colección de conversaciones" },
+    "/messages": { "schema": "Message", "description": "Colección de mensajes" },
+    "/animal_transfers": { "schema": "AnimalTransfer", "description": "Colección de propuestas de transferencia" },
+    "/inventory": { "schema": "InventoryItem", "description": "Colección de inventario de insumos" },
+    "/tasks": { "schema": "Task", "description": "Colección de tareas programadas" },
+    "/marketplace": { "schema": "MarketplaceOffer", "description": "Colección de ofertas públicas" },
+    "/reviews": { "schema": "Review", "description": "Colección de reseñas de usuarios" }
+  }
+}

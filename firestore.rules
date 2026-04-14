@@ -1,0 +1,309 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['id', 'displayName', 'email', 'photoURL', 'phone', 'address', 'ranchName', 'curp', 'rfc', 'upp', 'state', 'municipality', 'isPublic', 'updatedAt']) &&
+             data.displayName is string && data.displayName.size() < 100 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.ranchName is string && data.ranchName.size() < 100 &&
+             (data.photoURL == null || (data.photoURL is string && data.photoURL.size() < 1000)) &&
+             (data.phone == null || (data.phone is string && data.phone.size() < 20)) &&
+             (data.address == null || (data.address is string && data.address.size() < 500)) &&
+             (data.curp == null || (data.curp is string && data.curp.size() <= 18)) &&
+             (data.rfc == null || (data.rfc is string && data.rfc.size() <= 13)) &&
+             (data.upp == null || (data.upp is string && data.upp.size() < 50)) &&
+             (data.state == null || (data.state is string && data.state.size() < 100)) &&
+             (data.municipality == null || (data.municipality is string && data.municipality.size() < 100)) &&
+             (data.isPublic == null || data.isPublic is bool);
+    }
+
+    function isValidChat(data) {
+      return hasRequiredFields(['participants', 'updatedAt']) &&
+             data.participants is list && data.participants.size() == 2 &&
+             request.auth.uid in data.participants;
+    }
+
+    function isValidMessage(data) {
+      return hasRequiredFields(['chatId', 'senderId', 'text', 'date']) &&
+             data.chatId is string &&
+             data.senderId == request.auth.uid &&
+             data.text is string && data.text.size() < 5000;
+    }
+
+    function isValidAnimal(data) {
+      return hasRequiredFields(['nombre', 'id_arete', 'sexo', 'fecha_nacimiento', 'id_raza', 'id_categoria', 'id_potrero', 'peso', 'id_propietario']) &&
+             data.nombre is string && data.nombre.size() < 100 &&
+             data.id_arete is string && data.id_arete.size() < 50 &&
+             data.sexo in ['M', 'H'] &&
+             data.peso is number && data.peso >= 0;
+    }
+
+    function isValidReproductionEvent(data) {
+      return hasRequiredFields(['animalId', 'animalName', 'type', 'date', 'userId', 'createdAt']) &&
+             data.animalId is string && data.animalId.size() < 100 &&
+             data.animalName is string && data.animalName.size() < 100 &&
+             data.type in ["Inseminación", "Palpación", "Parto", "Celo"] &&
+             data.userId == request.auth.uid &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
+             (!('result' in data) || (data.result is string && data.result.size() < 500));
+    }
+
+    function isValidProductionRecord(data) {
+      return hasRequiredFields(['animalId', 'animalName', 'type', 'quantity', 'unit', 'date', 'userId', 'createdAt']) &&
+             data.animalId is string && data.animalId.size() < 100 &&
+             data.animalName is string && data.animalName.size() < 100 &&
+             data.type in ["Leche", "Carne"] &&
+             data.quantity is number &&
+             data.unit is string && data.unit.size() < 20 &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidFinanceTransaction(data) {
+      return hasRequiredFields(['type', 'amount', 'date', 'userId', 'createdAt']) &&
+             data.type in ["Venta", "Compra", "Ingreso", "Egreso"] &&
+             data.amount is number &&
+             data.userId == request.auth.uid &&
+             (!('category' in data) || (data.category is string && data.category.size() < 100)) &&
+             (!('description' in data) || (data.description is string && data.description.size() < 1000)) &&
+             (!('animalId' in data) || (data.animalId is string && data.animalId.size() < 100));
+    }
+
+    function isValidAnimalTransfer(data) {
+      return hasRequiredFields(['animalId', 'sellerId', 'buyerId', 'status', 'createdAt', 'participants']) &&
+             (data.sellerId == request.auth.uid || data.buyerId == request.auth.uid) &&
+             data.status == 'pending' &&
+             data.animalId is string &&
+             data.buyerId is string &&
+             data.participants is list &&
+             data.participants.size() == 2 &&
+             request.auth.uid in data.participants;
+    }
+
+    function isValidInventoryItem(data) {
+      return hasRequiredFields(['nombre', 'cantidad', 'unidad', 'userId', 'updatedAt']) &&
+             data.nombre is string && data.nombre.size() < 100 &&
+             data.cantidad is number &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidTask(data) {
+      return hasRequiredFields(['title', 'date', 'type', 'userId']) &&
+             data.title is string && data.title.size() < 100 &&
+             data.type in ["vacuna", "desparasitacion", "parto", "otro"] &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidMarketplaceOffer(data) {
+      return hasRequiredFields(['animalId', 'animalName', 'price', 'sellerId', 'createdAt']) &&
+             data.sellerId == request.auth.uid &&
+             data.price is number && data.price >= 0;
+    }
+
+    function isValidReview(data) {
+      return hasRequiredFields(['targetUserId', 'authorId', 'rating', 'createdAt']) &&
+             data.authorId == request.auth.uid &&
+             data.rating >= 1 && data.rating <= 5;
+    }
+
+    // Animals
+    match /animals/{animalId} {
+      allow read: if isAuthenticated() && (resource.data.id_propietario == request.auth.uid || 
+        exists(/databases/$(database)/documents/animal_transfers/$(animalId + "_" + request.auth.uid)));
+      allow create: if isAuthenticated() && request.resource.data.id_propietario == request.auth.uid && isValidAnimal(request.resource.data);
+      allow update: if isAuthenticated() && 
+        (
+          // Normal update by owner
+          (resource.data.id_propietario == request.auth.uid && request.resource.data.id_propietario == request.auth.uid && isValidAnimal(request.resource.data)) ||
+          // Transfer update: Seller moves animal to buyer AFTER buyer has accepted
+          (resource.data.id_propietario == request.auth.uid && 
+           request.resource.data.id_propietario != request.auth.uid &&
+           get(/databases/$(database)/documents/animal_transfers/$(animalId + "_" + request.resource.data.id_propietario)).data.status == 'accepted')
+        );
+      allow delete: if isAuthenticated() && resource.data.id_propietario == request.auth.uid;
+    }
+
+    // Razas
+    match /razas/{razaId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Read-only for users
+    }
+
+    // Fincas
+    match /fincas/{fincaId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Potreros
+    match /potreros/{potreroId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+    
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Health Events
+    match /health_events/{eventId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Feeding Records
+    match /feeding_records/{recordId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Reproduction Events
+    match /reproduction_events/{eventId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidReproductionEvent(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid && isValidReproductionEvent(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Production Records
+    match /production_records/{recordId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidProductionRecord(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid && isValidProductionRecord(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Finance Transactions
+    match /finance_transactions/{transactionId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidFinanceTransaction(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid && isValidFinanceTransaction(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // User Profiles (Private)
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    // Public Profiles (Safe fields only)
+    match /public_profiles/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+
+    // Chats
+    match /chats/{chatId} {
+      allow read: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      allow create: if isAuthenticated() && isValidChat(request.resource.data);
+      allow update: if isAuthenticated() && request.auth.uid in resource.data.participants;
+    }
+
+    // Messages
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() && 
+        get(/databases/$(database)/documents/chats/$(resource.data.chatId)).data.participants.hasAny([request.auth.uid]);
+      allow create: if isAuthenticated() && isValidMessage(request.resource.data) &&
+        get(/databases/$(database)/documents/chats/$(request.resource.data.chatId)).data.participants.hasAny([request.auth.uid]);
+      allow update: if isAuthenticated() && 
+        resource.data.senderId != request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']) &&
+        request.resource.data.read == true;
+    }
+
+    // Animal Transfers
+    match /animal_transfers/{transferId} {
+      allow get: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      allow list: if isAuthenticated() && resource.data.participants.hasAny([request.auth.uid]);
+      allow create: if isAuthenticated() && isValidAnimalTransfer(request.resource.data) &&
+        get(/databases/$(database)/documents/animals/$(request.resource.data.animalId)).data.id_propietario == request.resource.data.sellerId;
+      allow update: if isAuthenticated() && 
+        (
+          // Buyer accepting/rejecting (if seller initiated)
+          (resource.data.buyerId == request.auth.uid && 
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+           request.resource.data.status in ['accepted', 'rejected']) ||
+          // Seller accepting/rejecting (if buyer initiated)
+          (resource.data.sellerId == request.auth.uid && 
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+           request.resource.data.status in ['accepted', 'rejected']) ||
+          // Seller completing the transfer
+          (resource.data.sellerId == request.auth.uid && 
+           resource.data.status == 'accepted' &&
+           request.resource.data.status == 'completed' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+          // Cancellation by initiator
+          ((resource.data.sellerId == request.auth.uid || resource.data.buyerId == request.auth.uid) && 
+           resource.data.status == 'pending' &&
+           request.resource.data.status == 'rejected')
+        );
+    }
+
+    // Inventory
+    match /inventory/{itemId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidInventoryItem(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidInventoryItem(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Tasks
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidTask(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidTask(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Marketplace
+    match /marketplace/{offerId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidMarketplaceOffer(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.sellerId == request.auth.uid && isValidMarketplaceOffer(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.sellerId == request.auth.uid;
+    }
+
+    // Reviews
+    match /reviews/{reviewId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidReview(request.resource.data);
+      allow update: if false; // Reviews are immutable for now
+      allow delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+    }
+  }
+}
