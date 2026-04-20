@@ -283,7 +283,7 @@
     "/animal_transfers": { "schema": "AnimalTransfer", "description": "Colección de propuestas de transferencia" },
     "/inventory": { "schema": "InventoryItem", "description": "Colección de inventario de insumos" },
     "/tasks": { "schema": "Task", "description": "Colección de tareas programadas" },
-    "/marketplace": { "schema": "MarketplaceOffer", "description": "Colección de ofertas públicas" },
+    "/marketplace_offers": { "schema": "MarketplaceOffer", "description": "Colección de ofertas públicas" },
     "/reviews": { "schema": "Review", "description": "Colección de reseñas de usuarios" }
   }
 }

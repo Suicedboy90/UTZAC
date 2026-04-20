@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, Component } from 'react';
 import { 
   LayoutDashboard, 
   Bell, 
@@ -10,6 +10,7 @@ import {
   User, 
   Calendar, 
   Activity, 
+  Beef,
   Milk, 
   Baby, 
   Utensils,
@@ -18,7 +19,7 @@ import {
   X,
   HeartPulse,
   Wheat,
-  Map,
+  Map as MapIcon,
   ArrowLeftRight,
   ShoppingCart,
   ShoppingBag,
@@ -66,7 +67,8 @@ import {
 } from 'recharts';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, differenceInMonths, differenceInYears, isValid, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { QRCodeSVG } from 'qrcode.react';
+import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
+import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -87,6 +89,7 @@ import {
   deleteDoc,
   setDoc,
   doc, 
+  getDoc,
   serverTimestamp, 
   getDocs,
   writeBatch,
@@ -97,6 +100,8 @@ import { auth, db } from './firebase';
 import { cn } from './utils';
 
 // --- Constants ---
+const LOGO_URL = "https://i.imgur.com/9VzJJ0a.png"; // URL directa de la imagen de Imgur
+
 const PINOS_COMMUNITIES = [
   "Pinos (Cabecera)",
   "El Obraje",
@@ -348,6 +353,74 @@ interface FinanceTransaction {
 
 // --- Components ---
 
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState;
+  public props: ErrorBoundaryProps;
+
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+    this.props = props;
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-background">
+          <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center mb-6">
+            <AlertTriangle size={40} />
+          </div>
+          <h2 className="text-2xl font-black text-primary mb-2">Algo salió mal</h2>
+          <p className="text-gray-500 mb-8 max-w-md">La aplicación encontró un error inesperado. Por favor, intenta recargar la página.</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="accent-button"
+          >
+            Recargar Aplicación
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+const safeFormatDate = (date: any, formatStr: string = 'PPP') => {
+  try {
+    if (!date) return 'Reciente';
+    let d: Date;
+    if (date && typeof date.toDate === 'function') {
+      d = date.toDate();
+    } else if (date && typeof date.seconds === 'number') {
+      d = new Date(date.seconds * 1000);
+    } else {
+      d = new Date(date);
+    }
+    
+    if (!isValid(d)) return 'Reciente';
+    return format(d, formatStr, { locale: es });
+  } catch (e) {
+    return 'Reciente';
+  }
+};
+
 const DatePicker = ({ value, onChange }: { value: string, onChange: (val: string) => void }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [view, setView] = useState<'calendar' | 'years'>('calendar');
@@ -481,29 +554,41 @@ const DatePicker = ({ value, onChange }: { value: string, onChange: (val: string
   );
 };
 
-const TlanextliLogo = ({ className, light = false }: { className?: string, light?: boolean }) => (
-  <div className={cn("relative flex items-center gap-4", className)}>
-    <div className={cn(
-      "w-12 h-12 rounded-2xl flex items-center justify-center shadow-2xl transition-transform hover:scale-105",
-      light ? "bg-white" : "bg-primary"
-    )}>
-      <svg viewBox="0 0 100 100" className={cn("w-7 h-7", light ? "text-primary" : "text-white")}>
-        <path d="M20 80 L80 80 L70 60 L30 60 Z" fill="currentColor" />
-        <path d="M30 60 L70 60 L60 45 L40 45 Z" fill="currentColor" opacity="0.8" />
-        <path d="M40 45 L60 45 L55 35 L45 35 Z" fill="currentColor" opacity="0.6" />
-        <circle cx="50" cy="20" r="8" fill="#ffb703" />
-      </svg>
+const TlanextliLogo = ({ className, size = "md" }: { className?: string, light?: boolean, size?: "sm" | "md" | "lg" }) => {
+  const textSize = size === "sm" ? "text-xl" : size === "md" ? "text-2xl" : "text-4xl";
+  
+  if (LOGO_URL) {
+    return (
+      <div className={cn("flex items-center justify-center", className)}>
+        <img 
+          src={LOGO_URL} 
+          alt="Tlanextli Logo" 
+          className={cn(
+            "object-contain",
+            size === "sm" ? "h-12" : size === "md" ? "h-24" : "h-36"
+          )}
+          referrerPolicy="no-referrer"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn("flex flex-col items-center justify-center", className)}>
+      <div className="flex items-center gap-2">
+        <div className="p-2 bg-primary rounded-xl shadow-lg shadow-primary/20">
+          <LayoutDashboard className="text-white" size={size === "sm" ? 16 : size === "md" ? 24 : 32} />
+        </div>
+        <span className={cn("font-black tracking-tighter text-primary", textSize)}>
+          Tlanextli
+        </span>
+      </div>
+      <span className="text-[8px] font-black uppercase tracking-[0.3em] text-primary/40 mt-1">
+        Platform
+      </span>
     </div>
-    <div className="flex flex-col">
-      <h1 className={cn("text-2xl font-extrabold tracking-tight leading-none font-display", light ? "text-white" : "text-primary")}>
-        Tlanextli
-      </h1>
-      <p className={cn("text-[10px] font-bold uppercase tracking-[0.3em] leading-none mt-1.5", light ? "text-white/70" : "text-secondary")}>
-        Ganadería Elite
-      </p>
-    </div>
-  </div>
-);
+  );
+};
 
 const calculateAge = (birthDate: any) => {
   if (!birthDate) return 'N/A';
@@ -563,8 +648,10 @@ const AnimalCard: React.FC<{
   potreros: Potrero[],
   onClick?: () => void,
   onTransfer?: (e: React.MouseEvent) => void,
-  onShowQR?: (e: React.MouseEvent) => void
-}> = ({ animal, potreros, onClick, onTransfer, onShowQR }) => (
+  onShowQR?: (e: React.MouseEvent) => void,
+  onSell?: (e: React.MouseEvent) => void,
+  onDelete?: (e: React.MouseEvent) => void
+}> = ({ animal, potreros, onClick, onTransfer, onShowQR, onSell, onDelete }) => (
     <motion.div 
       whileHover={{ y: -8 }}
       whileTap={{ scale: 0.98 }}
@@ -572,14 +659,27 @@ const AnimalCard: React.FC<{
       onClick={onClick}
     >
     <div className="relative h-48 overflow-hidden">
-      <img 
-        src={animal.photoUrl || `https://picsum.photos/seed/${animal.id}/400/300`} 
-        alt={animal.nombre} 
-        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-        referrerPolicy="no-referrer"
-      />
-      <div className="absolute top-4 left-4 flex gap-2">
-        {animal.precio && (
+      {animal.photoUrl ? (
+        <img 
+          src={animal.photoUrl} 
+          alt={animal.nombre} 
+          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <div className="w-full h-full bg-gray-50 flex items-center justify-center">
+          <Camera size={48} className="text-gray-200" />
+        </div>
+      )}
+      <div className="absolute top-4 left-4 flex flex-col gap-2">
+        {animal.id_propietario?.startsWith('vendido_') && (
+          <div className="bg-red-600/90 backdrop-blur-md px-4 py-2 rounded-2xl shadow-lg border border-white/20">
+            <p className="text-white font-black text-xs uppercase tracking-widest">
+              Vendido
+            </p>
+          </div>
+        )}
+        {animal.precio && !animal.id_propietario?.startsWith('vendido_') && (
           <div className="bg-white/90 backdrop-blur-md px-4 py-2 rounded-2xl shadow-lg">
             <p className="text-primary font-black text-lg">
               ${animal.precio.toLocaleString()}
@@ -592,6 +692,19 @@ const AnimalCard: React.FC<{
             className="p-3 bg-white/90 backdrop-blur-md rounded-2xl shadow-lg text-primary hover:bg-white transition-all"
           >
             <Camera size={18} />
+          </button>
+        )}
+      </div>
+      <div className="absolute top-4 right-4 flex gap-2">
+        {onDelete && (
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(e);
+            }}
+            className="p-3 bg-white/90 backdrop-blur-md rounded-2xl shadow-lg text-red-500 hover:bg-red-50 hover:text-red-600 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+          >
+            <Trash2 size={18} />
           </button>
         )}
       </div>
@@ -634,12 +747,23 @@ const AnimalCard: React.FC<{
       </div>
 
       <div className="flex gap-2">
-        {onTransfer && (
+        {onTransfer && !animal.id_propietario?.startsWith('vendido_') && (
           <button 
             onClick={onTransfer}
             className="flex-1 py-4 bg-purple-50 text-purple-600 rounded-2xl font-bold text-[10px] uppercase tracking-widest hover:bg-purple-100 transition-all flex items-center justify-center gap-2"
           >
             <ArrowLeftRight size={14} /> Transferir
+          </button>
+        )}
+        {onSell && !animal.id_propietario?.startsWith('vendido_') && (
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              onSell(e);
+            }}
+            className="flex-1 py-4 bg-orange-50 text-orange-600 rounded-2xl font-bold text-[10px] uppercase tracking-widest hover:bg-orange-100 transition-all flex items-center justify-center gap-2"
+          >
+            <ShoppingBag size={14} /> Mercado
           </button>
         )}
         <button className="flex-1 py-4 bg-gray-50 text-primary rounded-2xl font-bold text-sm group-hover:bg-primary group-hover:text-white transition-all duration-300 flex items-center justify-center gap-2">
@@ -726,7 +850,7 @@ const BottomNavItem = ({ icon: Icon, label, active, onClick, badge }: { icon: Re
   </button>
 );
 
-const NotificationItem: React.FC<{ notification: Notification, onRead: (id: string) => void }> = ({ notification, onRead }) => {
+const NotificationItem: React.FC<{ notification: Notification, onClick: (n: Notification) => void }> = ({ notification, onClick }) => {
   const icons = {
     health: <HeartPulse className="text-red-600" size={18} />,
     birth: <Baby className="text-pink-600" size={18} />,
@@ -749,7 +873,7 @@ const NotificationItem: React.FC<{ notification: Notification, onRead: (id: stri
         "flex items-start gap-4 p-4 rounded-2xl transition-all border border-gray-50 cursor-pointer active:scale-[0.98]",
         notification.read ? "opacity-60 bg-gray-50/50" : "bg-white shadow-sm border-gray-100 hover:border-[#2e7d32]/20"
       )}
-      onClick={() => !notification.read && onRead(notification.id)}
+      onClick={() => onClick(notification)}
     >
       <div className={cn(
         "p-2.5 rounded-xl",
@@ -761,7 +885,7 @@ const NotificationItem: React.FC<{ notification: Notification, onRead: (id: stri
         <h4 className="font-bold text-sm text-[#1a1a1a]">{notification.title}</h4>
         <p className="text-xs text-gray-500 mt-1 leading-relaxed">{notification.message}</p>
         <span className="text-[10px] font-bold text-gray-400 mt-2 block uppercase tracking-widest">
-          {notification.date?.toDate?.().toLocaleString() || 'Reciente'}
+          {safeFormatDate(notification.date)}
         </span>
       </div>
       {!notification.read && <div className="w-2 h-2 rounded-full bg-[#2e7d32] mt-2 shadow-lg shadow-[#2e7d32]/40" />}
@@ -773,7 +897,7 @@ const FeedingRecordModal = ({ isOpen, onClose, onAdd, potreros }: { isOpen: bool
   const [formData, setFormData] = useState({
     potreroId: '',
     foodType: '',
-    quantity: 0,
+    quantity: '' as any,
     unit: 'kg',
     date: new Date().toISOString().split('T')[0],
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
@@ -794,6 +918,7 @@ const FeedingRecordModal = ({ isOpen, onClose, onAdd, potreros }: { isOpen: bool
 
     onAdd({
       ...formData,
+      quantity: parseFloat(formData.quantity as any) || 0,
       potreroNombre: potrero.nombre,
       date: finalDate
     });
@@ -859,7 +984,7 @@ const FeedingRecordModal = ({ isOpen, onClose, onAdd, potreros }: { isOpen: bool
               <input 
                 type="number"
                 value={formData.quantity}
-                onChange={(e) => setFormData({ ...formData, quantity: parseFloat(e.target.value) || 0 })}
+                onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
                 placeholder="0.00"
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
               />
@@ -934,7 +1059,7 @@ const HealthTab = ({ healthEvents, animals, onAddEvent }: { healthEvents: Health
                 <HeartPulse size={24} />
               </div>
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                {event.date?.toDate ? event.date.toDate().toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : (event.date ? new Date(event.date).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : 'Reciente')}
+                {safeFormatDate(event.date, 'dd/MM/yy HH:mm')}
               </span>
             </div>
             <h4 className="text-lg font-bold text-[#1a1a1a] mb-1">{event.type}</h4>
@@ -997,7 +1122,7 @@ const FeedingTab = ({ feedingRecords, potreros, onAddRecord }: { feedingRecords:
                 <Wheat size={24} />
               </div>
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                {record.date?.toDate ? record.date.toDate().toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : (record.date ? new Date(record.date).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : 'Reciente')}
+                {safeFormatDate(record.date, 'dd/MM/yy HH:mm')}
               </span>
             </div>
             <h4 className="text-lg font-bold text-[#1a1a1a] mb-1">{record.foodType}</h4>
@@ -1141,7 +1266,7 @@ const PotreroDetailsModal = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="p-2.5 rounded-xl bg-[#2e7d32]/10 text-[#2e7d32]">
-              <Map size={24} />
+              <MapIcon size={24} />
             </div>
             <div>
               <h2 className="text-xl font-bold text-[#1a1a1a]">{potrero.nombre}</h2>
@@ -1389,7 +1514,7 @@ const ProductionTab = ({ productionRecords, animals, onAddRecord }: { production
   const [formData, setFormData] = useState({
     animalId: '',
     type: 'Leche' as const,
-    quantity: 0,
+    quantity: '' as any,
     unit: 'Liters',
     date: new Date().toISOString().split('T')[0]
   });
@@ -1401,6 +1526,7 @@ const ProductionTab = ({ productionRecords, animals, onAddRecord }: { production
 
     onAddRecord({
       ...formData,
+      quantity: parseFloat(formData.quantity as any) || 0,
       animalName: animal.nombre,
       date: new Date(formData.date)
     });
@@ -1408,7 +1534,7 @@ const ProductionTab = ({ productionRecords, animals, onAddRecord }: { production
     setFormData({
       animalId: '',
       type: 'Leche',
-      quantity: 0,
+      quantity: '' as any,
       unit: 'Liters',
       date: new Date().toISOString().split('T')[0]
     });
@@ -1518,7 +1644,7 @@ const ProductionTab = ({ productionRecords, animals, onAddRecord }: { production
                       required
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
                       value={formData.quantity}
-                      onChange={(e) => setFormData({ ...formData, quantity: parseFloat(e.target.value) })}
+                      onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -1538,408 +1664,6 @@ const ProductionTab = ({ productionRecords, animals, onAddRecord }: { production
                   <DatePicker 
                     value={formData.date}
                     onChange={(val) => setFormData({ ...formData, date: val })}
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button 
-                    type="button"
-                    onClick={() => setIsModalOpen(false)} 
-                    className="flex-1 px-6 py-3.5 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-sm"
-                  >
-                    Cancelar
-                  </button>
-                  <button 
-                    type="submit"
-                    className="flex-[2] px-6 py-3.5 rounded-xl font-bold text-white bg-[#2e7d32] hover:bg-[#1b5e20] transition-colors shadow-lg shadow-[#2e7d32]/20 text-sm"
-                  >
-                    Guardar
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-const TransactionsTab = ({ transactions, animals, onAddTransaction, type }: { transactions: FinanceTransaction[], animals: Animal[], onAddTransaction: (data: any) => void, type: 'Venta' | 'Compra' }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    animalId: '',
-    amount: 0,
-    date: new Date().toISOString().split('T')[0],
-    category: '',
-    description: ''
-  });
-
-  const filteredTransactions = transactions.filter(t => t.type === type);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const animal = animals.find(a => a.id === formData.animalId);
-    
-    onAddTransaction({
-      ...formData,
-      type,
-      animalName: animal?.nombre || 'N/A',
-      date: new Date(formData.date)
-    });
-    setIsModalOpen(false);
-    setFormData({
-      animalId: '',
-      amount: 0,
-      date: new Date().toISOString().split('T')[0],
-      category: '',
-      description: ''
-    });
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-[#1a1a1a]">{type}s</h2>
-          <p className="text-sm text-gray-500">Registro de movimientos comerciales</p>
-        </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-[#2e7d32] text-white px-6 py-3 rounded-xl font-bold hover:bg-[#1b5e20] transition-colors shadow-lg shadow-[#2e7d32]/20"
-        >
-          <Plus size={20} />
-          <span>Nueva {type}</span>
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-        {filteredTransactions.map(t => (
-          <div key={t.id} className={cn("app-card border-l-4", type === 'Venta' ? "border-green-500" : "border-red-500")}>
-            <div className="flex justify-between items-start mb-4">
-              <div className={cn("p-2.5 rounded-xl", type === 'Venta' ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600")}>
-                {type === 'Venta' ? <ShoppingCart size={24} /> : <ShoppingBag size={24} />}
-              </div>
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                {new Date(t.date?.seconds * 1000 || t.date).toLocaleDateString()}
-              </span>
-            </div>
-            <h4 className="text-xl font-bold text-[#1a1a1a] mb-1">${t.amount.toLocaleString()}</h4>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">{t.category || 'General'}</p>
-            
-            <div className="space-y-2">
-              <p className="text-sm text-gray-700">{t.description}</p>
-              {t.animalId && (
-                <p className="text-[10px] font-bold text-[#2e7d32] uppercase tracking-widest">Animal ID: {t.animalId}</p>
-              )}
-            </div>
-          </div>
-        ))}
-        {filteredTransactions.length === 0 && (
-          <div className="col-span-full py-20 text-center bg-white rounded-3xl border border-dashed border-gray-200">
-            <div className="flex flex-col items-center gap-3 opacity-40">
-              {type === 'Venta' ? <ShoppingCart size={48} /> : <ShoppingBag size={48} />}
-              <p className="font-bold text-sm uppercase tracking-widest">No hay {type.toLowerCase()}s registradas</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <AnimatePresence>
-        {isModalOpen && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsModalOpen(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 flex flex-col gap-6 shadow-2xl"
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-[#1a1a1a]">Nueva {type}</h2>
-                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-400"><X size={20} /></button>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Monto ($)</label>
-                  <input 
-                    type="number" 
-                    required
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
-                    value={formData.amount}
-                    onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) })}
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Animal (Opcional)</label>
-                  <select 
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
-                    value={formData.animalId}
-                    onChange={(e) => setFormData({ ...formData, animalId: e.target.value })}
-                  >
-                    <option value="">Ninguno / Varios</option>
-                    {animals.map(animal => (
-                      <option key={animal.id} value={animal.id}>{animal.nombre} ({animal.id_arete})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Categoría</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
-                    placeholder="Ej: Ganado, Insumos..."
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Fecha</label>
-                  <DatePicker 
-                    value={formData.date}
-                    onChange={(val) => setFormData({ ...formData, date: val })}
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Descripción</label>
-                  <textarea 
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all h-24 resize-none text-sm"
-                    placeholder="Detalles de la transacción..."
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button 
-                    type="button"
-                    onClick={() => setIsModalOpen(false)} 
-                    className="flex-1 px-6 py-3.5 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-sm"
-                  >
-                    Cancelar
-                  </button>
-                  <button 
-                    type="submit"
-                    className="flex-[2] px-6 py-3.5 rounded-xl font-bold text-white bg-[#2e7d32] hover:bg-[#1b5e20] transition-colors shadow-lg shadow-[#2e7d32]/20 text-sm"
-                  >
-                    Guardar
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-const FinancesTab = ({ transactions, onAddTransaction }: { transactions: FinanceTransaction[], onAddTransaction: (data: any) => void }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    type: 'Ingreso' as const,
-    amount: 0,
-    date: new Date().toISOString().split('T')[0],
-    category: '',
-    description: ''
-  });
-
-  const totalIncome = transactions
-    .filter(t => t.type === 'Ingreso' || t.type === 'Venta')
-    .reduce((acc, t) => acc + t.amount, 0);
-  
-  const totalExpense = transactions
-    .filter(t => t.type === 'Egreso' || t.type === 'Compra' || t.type === 'Gasto')
-    .reduce((acc, t) => acc + t.amount, 0);
-
-  const balance = totalIncome - totalExpense;
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onAddTransaction({
-      ...formData,
-      date: new Date(formData.date)
-    });
-    setIsModalOpen(false);
-    setFormData({
-      type: 'Ingreso',
-      amount: 0,
-      date: new Date().toISOString().split('T')[0],
-      category: '',
-      description: ''
-    });
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-[#1a1a1a]">Finanzas</h2>
-          <p className="text-sm text-gray-500">Resumen económico del rancho</p>
-        </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-[#2e7d32] text-white px-6 py-3 rounded-xl font-bold hover:bg-[#1b5e20] transition-colors shadow-lg shadow-[#2e7d32]/20"
-        >
-          <Plus size={20} />
-          <span>Nuevo Movimiento</span>
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
-        <div className="app-card border-l-4 border-green-500 bg-white">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Ingresos Totales</p>
-          <h3 className="text-3xl font-black text-green-600">${totalIncome.toLocaleString()}</h3>
-        </div>
-        <div className="app-card border-l-4 border-red-500 bg-white">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Egresos Totales</p>
-          <h3 className="text-3xl font-black text-red-600">${totalExpense.toLocaleString()}</h3>
-        </div>
-        <div className={cn("app-card border-l-4", balance >= 0 ? "border-blue-500 bg-white" : "border-orange-500 bg-white")}>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Balance Neto</p>
-          <h3 className={cn("text-3xl font-black", balance >= 0 ? "text-blue-600" : "text-orange-600")}>
-            ${balance.toLocaleString()}
-          </h3>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm">
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-          <h3 className="text-lg font-bold text-[#1a1a1a]">Historial de Transacciones</h3>
-          <div className="p-2.5 rounded-xl bg-white text-gray-400 border border-gray-100">
-            <Wallet size={20} />
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100">
-                <th className="px-6 py-4">Fecha</th>
-                <th className="px-6 py-4">Tipo</th>
-                <th className="px-6 py-4">Categoría</th>
-                <th className="px-6 py-4">Descripción</th>
-                <th className="px-6 py-4 text-right">Monto</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {transactions.sort((a, b) => {
-                const dateA = a.date?.seconds ? a.date.seconds * 1000 : new Date(a.date).getTime();
-                const dateB = b.date?.seconds ? b.date.seconds * 1000 : new Date(b.date).getTime();
-                return dateB - dateA;
-              }).map(t => (
-                <tr key={t.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 text-sm text-gray-600">{new Date(t.date?.seconds * 1000 || t.date).toLocaleDateString()}</td>
-                  <td className="px-6 py-4">
-                    <span className={cn(
-                      "text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-lg",
-                      (t.type === 'Ingreso' || t.type === 'Venta') ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
-                    )}>
-                      {t.type}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-semibold text-[#1a1a1a]">{t.category || 'General'}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">{t.description || '-'}</td>
-                  <td className={cn(
-                    "px-6 py-4 text-sm font-bold text-right",
-                    (t.type === 'Ingreso' || t.type === 'Venta') ? "text-green-600" : "text-red-600"
-                  )}>
-                    {(t.type === 'Ingreso' || t.type === 'Venta') ? '+' : '-'}${t.amount.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-              {transactions.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-gray-400 font-bold text-sm uppercase tracking-widest">
-                    No hay transacciones registradas
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {isModalOpen && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsModalOpen(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 flex flex-col gap-6 shadow-2xl"
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-[#1a1a1a]">Nuevo Movimiento</h2>
-                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-400"><X size={20} /></button>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Tipo</label>
-                  <select 
-                    required
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
-                    value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
-                  >
-                    <option value="Ingreso">Ingreso</option>
-                    <option value="Egreso">Egreso</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Monto ($)</label>
-                  <input 
-                    type="number" 
-                    required
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
-                    value={formData.amount}
-                    onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) })}
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Categoría</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
-                    placeholder="Ej: Alimento, Medicinas..."
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Fecha</label>
-                  <DatePicker 
-                    value={formData.date}
-                    onChange={(val) => setFormData({ ...formData, date: val })}
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-700 ml-1">Descripción</label>
-                  <textarea 
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all h-24 resize-none text-sm"
-                    placeholder="Detalles del movimiento..."
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   />
                 </div>
 
@@ -2002,7 +1726,7 @@ const PotrerosTab = ({ potreros, animals, onAddPotrero, onUpdateAnimal }: { potr
             >
               <div className="flex justify-between items-start mb-4">
                 <div className="p-2.5 rounded-xl bg-[#2e7d32]/10 text-[#2e7d32]">
-                  <Map size={24} />
+                  <MapIcon size={24} />
                 </div>
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
                   {potreroAnimals.length} Animales
@@ -2039,7 +1763,7 @@ const PotrerosTab = ({ potreros, animals, onAddPotrero, onUpdateAnimal }: { potr
         {potreros.length === 0 && (
           <div className="col-span-full py-20 text-center bg-white rounded-3xl border border-dashed border-gray-200">
             <div className="flex flex-col items-center gap-3 opacity-40">
-              <Map size={48} />
+              <MapIcon size={48} />
               <p className="font-bold text-sm uppercase tracking-widest">No hay potreros registrados</p>
             </div>
           </div>
@@ -2056,7 +1780,7 @@ const PotrerosTab = ({ potreros, animals, onAddPotrero, onUpdateAnimal }: { potr
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
         potrero={selectedPotrero}
-        animals={animals}
+        animals={animals.filter(a => !a.id_propietario?.startsWith('vendido_'))}
         potreros={potreros}
         onUpdateAnimal={onUpdateAnimal}
       />
@@ -2074,9 +1798,23 @@ const AnimalsModal: React.FC<{
   onAddNew: () => void,
   onEdit: (animal: Animal) => void,
   onTransfer: (animal: Animal) => void,
-  onShowQR: (animal: Animal) => void
-}> = ({ isOpen, onClose, animals, potreros, searchTerm, setSearchTerm, onAddNew, onEdit, onTransfer, onShowQR }) => {
+  onShowQR: (animal: Animal) => void,
+  onSell: (animal: Animal) => void
+}> = ({ isOpen, onClose, animals, potreros, searchTerm, setSearchTerm, onAddNew, onEdit, onTransfer, onShowQR, onSell }) => {
+  const [cattleFilter, setCattleFilter] = useState<'activos' | 'vendidos'>('activos');
+
   if (!isOpen) return null;
+
+  const filteredAnimals = animals.filter(a => {
+    const matchesSearch = (a.id_arete.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                           a.nombre.toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    if (cattleFilter === 'vendidos') {
+      return matchesSearch && a.id_propietario?.startsWith('vendido_');
+    }
+    
+    return matchesSearch && !a.id_propietario?.startsWith('vendido_');
+  });
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
@@ -2121,39 +1859,63 @@ const AnimalsModal: React.FC<{
           </div>
         </div>
 
-        <div className="relative w-full sm:w-96">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-          <input 
-            type="text" 
-            placeholder="Buscar por ID Arete o Nombre..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-white border border-gray-100 rounded-xl py-3.5 pl-12 pr-6 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm shadow-sm"
-          />
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="relative w-full sm:w-96">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input 
+              type="text" 
+              placeholder="Buscar por ID Arete o Nombre..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-white border border-gray-100 rounded-xl py-3.5 pl-12 pr-6 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm shadow-sm"
+            />
+          </div>
+
+          <div className="flex bg-white p-1 rounded-2xl border border-gray-100 shadow-sm w-full sm:w-auto">
+            <button 
+              onClick={() => setCattleFilter('activos')}
+              className={cn(
+                "flex-1 sm:flex-none px-6 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all",
+                cattleFilter === 'activos' ? "bg-primary text-white shadow-lg" : "text-gray-400 hover:text-primary"
+              )}
+            >
+              Hato Activo ({animals.filter(a => !a.id_propietario?.startsWith('vendido_')).length})
+            </button>
+            <button 
+              onClick={() => setCattleFilter('vendidos')}
+              className={cn(
+                "flex-1 sm:flex-none px-6 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all",
+                cattleFilter === 'vendidos' ? "bg-red-600 text-white shadow-lg" : "text-gray-400 hover:text-red-600"
+              )}
+            >
+              Vendidos ({animals.filter(a => a.id_propietario?.startsWith('vendido_')).length})
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 pb-8">
-            {animals
-              .filter(a => (a.id_arete.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            a.nombre.toLowerCase().includes(searchTerm.toLowerCase())))
-              .map(animal => (
-                <AnimalCard 
-                  key={animal.id} 
-                  animal={animal} 
-                  potreros={potreros} 
-                  onClick={() => onEdit(animal)}
-                  onTransfer={(e) => {
-                    e.stopPropagation();
-                    onTransfer(animal);
-                  }}
-                  onShowQR={(e) => {
-                    e.stopPropagation();
-                    onShowQR(animal);
-                  }}
-                />
+            {filteredAnimals.map(animal => (
+              <AnimalCard 
+                key={animal.id} 
+                animal={animal} 
+                potreros={potreros} 
+                onClick={() => onEdit(animal)}
+                onTransfer={(e) => {
+                  e.stopPropagation();
+                  onTransfer(animal);
+                }}
+                onShowQR={(e) => {
+                  e.stopPropagation();
+                  onShowQR(animal);
+                }}
+                onSell={(e) => {
+                  e.stopPropagation();
+                  onSell(animal);
+                }}
+              />
             ))}
-            {animals.length === 0 && (
+            {filteredAnimals.length === 0 && (
               <div className="col-span-full py-20 text-center bg-white rounded-3xl border border-dashed border-gray-200">
                 <div className="flex flex-col items-center gap-3 opacity-40">
                   <Activity size={48} />
@@ -2172,6 +1934,7 @@ const AnimalsModal: React.FC<{
   onClose, 
   onAdd,
   onUpdate,
+  onDelete,
   potreros,
   initialPotrero = '',
   editingAnimal = null,
@@ -2179,8 +1942,9 @@ const AnimalsModal: React.FC<{
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
-  onAdd: (data: any) => void,
-  onUpdate: (id: string, data: any) => void,
+  onAdd: (data: any) => Promise<void>,
+  onUpdate: (id: string, data: any) => Promise<void>,
+  onDelete?: (animal: Animal) => void,
   potreros: Potrero[],
   initialPotrero?: string,
   editingAnimal?: Animal | null,
@@ -2194,10 +1958,11 @@ const AnimalsModal: React.FC<{
     id_raza: 'raza_1',
     id_categoria: 'cat_4',
     id_potrero: initialPotrero || '',
-    peso: 0,
-    precio: 0,
-    tipo_produccion: 'Carne',
-    photoUrl: ''
+    peso: editingAnimal ? editingAnimal.peso : '' as any,
+    precio: editingAnimal ? editingAnimal.precio : '' as any,
+    tipo_produccion: editingAnimal ? editingAnimal.tipo_produccion : 'Carne',
+    photoUrl: '',
+    origen: 'nacido' as 'nacido' | 'comprado'
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -2215,10 +1980,11 @@ const AnimalsModal: React.FC<{
           id_raza: editingAnimal.id_raza || 'raza_1',
           id_categoria: editingAnimal.id_categoria || 'cat_4',
           id_potrero: editingAnimal.id_potrero || '',
-          peso: editingAnimal.peso || 0,
-          precio: editingAnimal.precio || 0,
+          peso: editingAnimal.peso || '',
+          precio: editingAnimal.precio || '',
           tipo_produccion: editingAnimal.tipo_produccion || 'Carne',
-          photoUrl: editingAnimal.photoUrl || ''
+          photoUrl: editingAnimal.photoUrl || '',
+          origen: editingAnimal.precio && Number(editingAnimal.precio) > 0 ? 'comprado' : 'nacido'
         });
       } else {
         setFormData({
@@ -2229,10 +1995,11 @@ const AnimalsModal: React.FC<{
           id_raza: 'raza_1',
           id_categoria: 'cat_4',
           id_potrero: initialPotrero || (potreros[0]?.id || ''),
-          peso: 0,
-          precio: 0,
+          peso: '',
+          precio: '',
           tipo_produccion: 'Carne',
-          photoUrl: ''
+          photoUrl: '',
+          origen: 'nacido'
         });
       }
       setIsSaving(false);
@@ -2285,10 +2052,15 @@ const AnimalsModal: React.FC<{
     }
     setIsSaving(true);
     try {
+      const animalData = {
+        ...formData,
+        peso: parseFloat(formData.peso as any) || 0,
+        precio: formData.origen === 'comprado' ? (parseFloat(formData.precio as any) || 0) : 0
+      };
       if (editingAnimal) {
-        await onUpdate(editingAnimal.id, formData);
+        await onUpdate(editingAnimal.id, animalData);
       } else {
-        await onAdd(formData);
+        await onAdd(animalData);
       }
       onClose();
     } catch (error: any) {
@@ -2435,11 +2207,89 @@ const AnimalsModal: React.FC<{
             <input 
               type="number" 
               value={formData.peso}
-              onChange={(e) => setFormData({ ...formData, peso: parseFloat(e.target.value) || 0 })}
+              onChange={(e) => setFormData({ ...formData, peso: e.target.value })}
               placeholder="0.00" 
               className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
             />
           </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-gray-700 ml-1">Origen del Animal</label>
+            <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-200">
+              <button 
+                type="button"
+                onClick={() => setFormData({ ...formData, origen: 'nacido' })}
+                className={cn(
+                  "flex-1 py-2 px-4 rounded-lg text-xs font-bold transition-all",
+                  formData.origen === 'nacido' ? "bg-white text-primary shadow-sm" : "text-gray-400 hover:text-gray-600"
+                )}
+              >
+                Nacido en Rancho
+              </button>
+              <button 
+                type="button"
+                onClick={() => setFormData({ ...formData, origen: 'comprado' })}
+                className={cn(
+                  "flex-1 py-2 px-4 rounded-lg text-xs font-bold transition-all",
+                  formData.origen === 'comprado' ? "bg-white text-primary shadow-sm" : "text-gray-400 hover:text-gray-600"
+                )}
+              >
+                Comprado / Adquirido
+              </button>
+            </div>
+          </div>
+
+          {formData.origen === 'comprado' && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-gray-700 ml-1">Precio de Compra ($)</label>
+              <input 
+                type="number" 
+                value={formData.precio}
+                onChange={(e) => setFormData({ ...formData, precio: e.target.value })}
+                placeholder="0.00" 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
+              />
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-gray-700 ml-1">Origen del Animal</label>
+            <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-200">
+              <button 
+                type="button"
+                onClick={() => setFormData({ ...formData, origen: 'nacido' })}
+                className={cn(
+                  "flex-1 py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase transition-all",
+                  formData.origen === 'nacido' ? "bg-white text-primary shadow-sm" : "text-gray-400 hover:text-gray-600"
+                )}
+              >
+                Nacido
+              </button>
+              <button 
+                type="button"
+                onClick={() => setFormData({ ...formData, origen: 'comprado' })}
+                className={cn(
+                  "flex-1 py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase transition-all",
+                  formData.origen === 'comprado' ? "bg-white text-primary shadow-sm" : "text-gray-400 hover:text-gray-600"
+                )}
+              >
+                Comprado
+              </button>
+            </div>
+          </div>
+
+          {formData.origen === 'comprado' && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-gray-700 ml-1">Precio de Compra ($)</label>
+              <input 
+                type="number" 
+                value={formData.precio}
+                onChange={(e) => setFormData({ ...formData, precio: e.target.value })}
+                placeholder="0.00" 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
+              />
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-gray-700 ml-1">Potrero</label>
             <select 
@@ -2474,7 +2324,18 @@ const AnimalsModal: React.FC<{
         </div>
 
         <div className="flex gap-3 pt-2">
+          {editingAnimal && onDelete && (
+            <button 
+              type="button"
+              onClick={() => onDelete(editingAnimal)}
+              className="p-3.5 rounded-xl text-red-500 bg-red-50 hover:bg-red-100 transition-colors"
+              title="Eliminar animal"
+            >
+              <Trash2 size={24} />
+            </button>
+          )}
           <button 
+            type="button"
             onClick={onClose}
             disabled={isSaving}
             className="flex-1 px-6 py-3.5 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-sm disabled:opacity-50"
@@ -2581,6 +2442,10 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [animalToDelete, setAnimalToDelete] = useState<Animal | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAnimalsModalOpen, setIsAnimalsModalOpen] = useState(false);
   const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
@@ -2595,11 +2460,15 @@ export default function App() {
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [hasDismissedProfileModal, setHasDismissedProfileModal] = useState(() => {
+    return localStorage.getItem('hasDismissedProfileModal') === 'true';
+  });
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isInventoryModalOpen, setIsInventoryModalOpen] = useState(false);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [isMarketplaceModalOpen, setIsMarketplaceModalOpen] = useState(false);
+  const [marketplaceAnimal, setMarketplaceAnimal] = useState<Animal | null>(null);
   const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -2619,36 +2488,78 @@ export default function App() {
   const [localProfile, setLocalProfile] = useState<Partial<UserProfile>>({});
 
   const [qrAnimal, setQrAnimal] = useState<Animal | null>(null);
+  const [scannedHistory, setScannedHistory] = useState<{
+    health: HealthEvent[],
+    reproduction: ReproductionEvent[],
+    production: ProductionRecord[],
+    finance: FinanceTransaction[]
+  } | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
+  const [taskToEdit, setTaskToEdit] = useState<Partial<Task>>({});
 
   // ... existing state ...
+  const activeAnimals = useMemo(() => animals.filter(a => !a.id_propietario?.startsWith('vendido_')), [animals]);
+  const soldAnimals = useMemo(() => animals.filter(a => a.id_propietario?.startsWith('vendido_')), [animals]);
+
+  const activeHealthStats = useMemo(() => {
+    const activeAnimalIds = new Set(activeAnimals.map(a => a.id));
+    const eventsForActive = healthEvents.filter(e => {
+      const aId = e.animalId || (e as any).id_animal;
+      return activeAnimalIds.has(aId);
+    });
+    
+    // We count UNIQUE sick animals to get a "Current sick count"
+    // An animal is considered sick if it has an "Enfermedad" event within our loaded events
+    const sickAnimalIds = new Set(
+      eventsForActive
+        .filter(e => e.type === 'Enfermedad')
+        .map(e => e.animalId || (e as any).id_animal)
+    );
+    const activeSickCount = sickAnimalIds.size;
+    
+    return {
+      total: activeAnimals.length,
+      sick: activeSickCount,
+      healthy: Math.max(0, activeAnimals.length - activeSickCount),
+      vaccinations: eventsForActive.filter(e => e.type === 'Vacunación').length
+    };
+  }, [activeAnimals, healthEvents]);
+
   const [activeToast, setActiveToast] = useState<{ title: string, message: string, type: string } | null>(null);
-  const lastNotificationCount = useRef<number | null>(null);
+  const lastNotificationIds = useRef<Set<string>>(new Set());
 
   // Monitor notifications for Toast
   useEffect(() => {
     if (notifications.length === 0) {
-      lastNotificationCount.current = 0;
+      lastNotificationIds.current = new Set();
       return;
     }
 
-    if (lastNotificationCount.current === null) {
-      lastNotificationCount.current = notifications.length;
+    // On first load, just fill the set without showing toasts
+    if (lastNotificationIds.current.size === 0) {
+      lastNotificationIds.current = new Set(notifications.map(n => n.id));
       return;
     }
 
-    if (notifications.length > lastNotificationCount.current) {
-      const newNotification = notifications[0]; // Newest is first
-      if (!newNotification.read) {
-        setActiveToast({
-          title: newNotification.title,
-          message: newNotification.message,
-          type: newNotification.type
-        });
-        setTimeout(() => setActiveToast(null), 5000);
-      }
+    const newNotifications = notifications.filter(n => !lastNotificationIds.current.has(n.id) && !n.read);
+    
+    if (newNotifications.length > 0) {
+      const n = newNotifications[0];
+      setActiveToast({
+        title: n.title,
+        message: n.message,
+        type: n.type
+      });
+      // Important to update the set so we don't trigger again for the same ID
+      lastNotificationIds.current = new Set(notifications.map(n => n.id));
+      setTimeout(() => setActiveToast(null), 5000);
+    } else {
+      lastNotificationIds.current = new Set(notifications.map(n => n.id));
     }
-    lastNotificationCount.current = notifications.length;
   }, [notifications]);
 
   const monthlyData = useMemo(() => {
@@ -2674,20 +2585,124 @@ export default function App() {
 
     return last6Months;
   }, [financeTransactions]);
+
+  const expensesByCategory = useMemo(() => {
+    const categories: { [key: string]: number } = {};
+    financeTransactions
+      .filter(t => t.type === 'Gasto' || t.type === 'Egreso' || t.type === 'Compra')
+      .forEach(t => {
+        const category = t.category || 'Otros';
+        categories[category] = (categories[category] || 0) + Number(t.amount || 0);
+      });
+    
+    return Object.entries(categories)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [financeTransactions]);
+
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  const fetchAnimalHistory = useCallback(async (animalId: string) => {
+    if (!user) return;
+    setLoadingHistory(true);
+    try {
+      const [healthSnap, reproSnap, prodSnap, financeSnap, oldHealthSnap, oldReproSnap, oldProdSnap, oldFinanceSnap] = await Promise.all([
+        getDocs(query(collection(db, 'health_events'), where('animalId', '==', animalId), orderBy('date', 'desc'))),
+        getDocs(query(collection(db, 'reproduction_events'), where('animalId', '==', animalId), orderBy('date', 'desc'))),
+        getDocs(query(collection(db, 'production_records'), where('animalId', '==', animalId), orderBy('date', 'desc'))),
+        getDocs(query(collection(db, 'finance_transactions'), where('animalId', '==', animalId), orderBy('date', 'desc'))),
+        // Fallback for legacy id_animal field
+        getDocs(query(collection(db, 'health_events'), where('id_animal', '==', animalId), orderBy('date', 'desc'))),
+        getDocs(query(collection(db, 'reproduction_events'), where('id_animal', '==', animalId), orderBy('date', 'desc'))),
+        getDocs(query(collection(db, 'production_records'), where('id_animal', '==', animalId), orderBy('date', 'desc'))),
+        getDocs(query(collection(db, 'finance_transactions'), where('id_animal', '==', animalId), orderBy('date', 'desc')))
+      ]);
+
+      const mergeDocs = (snap1: any, snap2: any) => {
+        const all = [...snap1.docs, ...snap2.docs];
+        const merged = Array.from(new Map(all.map((d: any) => [d.id, { id: d.id, ...d.data() }])).values());
+        return merged.sort((a: any, b: any) => {
+          const getVal = (v: any) => v?.toDate ? v.toDate().getTime() : (v ? new Date(v).getTime() : 0);
+          return getVal(b.date) - getVal(a.date);
+        });
+      };
+
+      setScannedHistory({
+        health: mergeDocs(healthSnap, oldHealthSnap) as HealthEvent[],
+        reproduction: mergeDocs(reproSnap, oldReproSnap) as ReproductionEvent[],
+        production: mergeDocs(prodSnap, oldProdSnap) as ProductionRecord[],
+        finance: mergeDocs(financeSnap, oldFinanceSnap) as FinanceTransaction[]
+      });
+    } catch (err) {
+      console.error("Error fetching animal history:", err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [user]);
+
+  const handleAnimalScan = useCallback(async (animalId: string) => {
+    if (!user) return;
+    
+    try {
+      // 1. Fetch Animal Data
+      const animalDoc = await getDoc(doc(db, 'animals', animalId));
+      if (!animalDoc.exists()) {
+        setActiveToast({
+          title: 'Animal No Encontrado',
+          message: 'El código QR no corresponde a ningún animal registrado.',
+          type: 'error'
+        });
+        setTimeout(() => setActiveToast(null), 5000);
+        return;
+      }
+
+      const animalData = { id: animalDoc.id, ...animalDoc.data() } as Animal;
+      setQrAnimal(animalData);
+
+      // 2. Fetch All Related Events
+      await fetchAnimalHistory(animalId);
+
+      setIsQrModalOpen(true);
+      setIsScannerModalOpen(false);
+    } catch (error) {
+      console.error("Error fetching animal scan data:", error);
+      setActiveToast({
+        title: 'Error de Escaneo',
+        message: 'No pudimos obtener la información completa del animal.',
+        type: 'error'
+      });
+      setTimeout(() => setActiveToast(null), 5000);
+    }
+  }, [user, fetchAnimalHistory]);
+
+  // Handle deep linking for animal history via QR code
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const animalId = params.get('animalId');
+    if (animalId && user && !qrAnimal) {
+       handleAnimalScan(animalId);
+       // Clear URL
+       const newUrl = window.location.origin + window.location.pathname;
+       window.history.replaceState({}, document.title, newUrl);
+    }
+  }, [user, handleAnimalScan, qrAnimal]);
+
   const unreadMessagesCount = useMemo(() => {
-    return chats.reduce((acc, chat) => {
-      // This is a bit expensive since we don't have all messages for all chats
-      // But we can check if lastMessageSenderId !== user.uid and if we have a way to know if it was read
-      // Actually, without all messages, we'd need unreadCount in the chat doc.
-      // For now, let's just use the notifications of type 'chat' that are unread.
-      return acc + notifications.filter(n => n.type === 'chat' && !n.read).length;
-    }, 0);
-  }, [notifications, chats]);
+    return notifications.filter(n => n.type === 'chat' && !n.read).length;
+  }, [notifications]);
+
+  const activeRanchersCount = useMemo(() => {
+    if (!user) return 0;
+    const now = new Date().getTime();
+    const onlineOthers = publicProfiles.filter(p => {
+      const profileLastSeen = p.lastSeen?.toDate ? p.lastSeen.toDate().getTime() : (p.lastSeen ? new Date(p.lastSeen).getTime() : 0);
+      return now - profileLastSeen < 5 * 60000; // 5 minutes threshold
+    }).length;
+    return onlineOthers + 1; // Current user included
+  }, [publicProfiles, user]);
 
   // Auth Listener
   useEffect(() => {
@@ -2707,14 +2722,15 @@ export default function App() {
     }
 
     const messagesUnsubscribe = onSnapshot(
-      query(collection(db, 'messages'), where('chatId', '==', activeChat.id)),
+      query(
+        collection(db, 'messages'), 
+        where('chatId', '==', activeChat.id),
+        orderBy('date', 'asc'),
+        limit(100)
+      ),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
-        setMessages(data.sort((a, b) => {
-          const dateA = a.date?.toDate ? a.date.toDate() : (a.date ? new Date(a.date) : new Date());
-          const dateB = b.date?.toDate ? b.date.toDate() : (b.date ? new Date(b.date) : new Date());
-          return dateA.getTime() - dateB.getTime();
-        }));
+        setMessages(data);
       },
       (error) => handleFirestoreError(error, OperationType.GET, `messages/${activeChat.id}`, auth)
     );
@@ -2785,18 +2801,23 @@ export default function App() {
       });
 
       if (otherUserId) {
-        await addDoc(collection(db, 'notifications'), {
-          userId: otherUserId,
-          title: 'Nuevo Mensaje',
-          message: `Has recibido un mensaje de ${userProfile?.ranchName || 'un ganadero'}`,
-          date: serverTimestamp(),
-          type: 'chat',
-          read: false,
-          chatId: activeChat.id
-        });
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            userId: otherUserId,
+            title: 'Nuevo Mensaje',
+            message: `Has recibido un mensaje de ${userProfile?.ranchName || 'un ganadero'}`,
+            date: serverTimestamp(),
+            type: 'chat',
+            read: false,
+            chatId: activeChat.id
+          });
+        } catch (notifErr) {
+          console.error("Error sending notification:", notifErr);
+          // Don't throw here, the message was already sent
+        }
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'messages', auth);
+      handleFirestoreError(error, OperationType.WRITE, 'messages/notifications', auth);
     }
   };
 
@@ -2847,6 +2868,18 @@ export default function App() {
       await updateDoc(doc(db, 'animal_transfers', transfer.id), {
         status: 'accepted',
         updatedAt: serverTimestamp()
+      });
+
+      // Record a 'Compra' for the buyer in real-time
+      await addDoc(collection(db, 'finance_transactions'), {
+        userId: user.uid,
+        amount: Number(transfer.price) || 0,
+        type: 'Compra',
+        date: serverTimestamp(),
+        category: 'Compra de Ganado',
+        description: `Compra aceptada: ${transfer.animalName} (#${transfer.animalArete}) de ${transfer.sellerName}`,
+        animalId: transfer.animalId,
+        createdAt: serverTimestamp()
       });
 
       const otherPartyId = transfer.sellerId === user.uid ? transfer.buyerId : transfer.sellerId;
@@ -2903,24 +2936,109 @@ export default function App() {
 
   const handleCompleteTransfer = async (transfer: AnimalTransfer) => {
     if (!user) return;
-    try {
-      // 1. Update transfer status
-      await updateDoc(doc(db, 'animal_transfers', transfer.id), {
-        status: 'completed',
-        updatedAt: serverTimestamp()
+    
+    // Safety check: Ensure transfer is still accepted and seller still owns the animal
+    if (transfer.status !== 'accepted') {
+      setActiveToast({
+        title: 'Error',
+        message: 'La transferencia ya no está en estado aceptado.',
+        type: 'error'
       });
+      setTimeout(() => setActiveToast(null), 5000);
+      return;
+    }
 
-      // 2. Update animal owner
-      await updateDoc(doc(db, 'animals', transfer.animalId), {
+    const animalDoc = await getDoc(doc(db, 'animals', transfer.animalId));
+    if (!animalDoc.exists() || animalDoc.data().id_propietario !== user.uid) {
+      setActiveToast({
+        title: 'Error',
+        message: 'Ya no eres el propietario de este animal.',
+        type: 'error'
+      });
+      setTimeout(() => setActiveToast(null), 5000);
+      return;
+    }
+
+    try {
+      // 1 & 2. Update animal owner and transfer status atomically
+      const mainBatch = writeBatch(db);
+      
+      mainBatch.update(doc(db, 'animals', transfer.animalId), {
         id_propietario: transfer.buyerId,
         id_potrero: 'sin_asignar' // Reset pasture for new owner
       });
 
-      // 3. Create finance transactions for both
+      mainBatch.update(doc(db, 'animal_transfers', transfer.id), {
+        status: 'completed',
+        updatedAt: serverTimestamp()
+      });
+
+      await mainBatch.commit();
+      
+      // 3. Cleanup Marketplace Offer if exists
+      const marketplaceQuery = query(collection(db, 'marketplace_offers'), where('animalId', '==', transfer.animalId));
+      const marketplaceSnapshot = await getDocs(marketplaceQuery);
+      for (const docSnap of marketplaceSnapshot.docs) {
+        await deleteDoc(doc(db, 'marketplace_offers', docSnap.id));
+      }
+
+      // 3.5 Cleanup other pending/accepted transfers for this animal
+      const otherTransfersQuery = query(
+        collection(db, 'animal_transfers'), 
+        where('animalId', '==', transfer.animalId),
+        where('status', 'in', ['pending', 'accepted'])
+      );
+      const otherTransfersSnapshot = await getDocs(otherTransfersQuery);
+      for (const docSnap of otherTransfersSnapshot.docs) {
+        if (docSnap.id !== transfer.id) {
+          await updateDoc(doc(db, 'animal_transfers', docSnap.id), {
+            status: 'rejected',
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+
+      // 4. Update History (Events) to follow the new owner
+      const collectionsToUpdate = ['health_events', 'feeding_records', 'reproduction_events', 'production_records', 'tasks', 'finance_transactions'];
+      
+      for (const collName of collectionsToUpdate) {
+        // We fetch ALL records for this animal ID, regardless of current userId, 
+        // to ensure history from previous owners is also migrated to the new one.
+        const qByAnimalId = query(
+          collection(db, collName), 
+          where('animalId', '==', transfer.animalId)
+        );
+        const qByIdAnimal = query(
+          collection(db, collName), 
+          where('id_animal', '==', transfer.animalId)
+        );
+
+        const [snap1, snap2] = await Promise.all([getDocs(qByAnimalId), getDocs(qByIdAnimal)]);
+        const allDocs = [...snap1.docs, ...snap2.docs];
+        
+        // Remove duplicates if any doc appeared in both queries
+        const uniqueDocs = Array.from(new Map(allDocs.map(d => [d.id, d])).values());
+
+        if (uniqueDocs.length > 0) {
+          // Process in sub-batches of 500 to avoid Firestore limits
+          for (let i = 0; i < uniqueDocs.length; i += 500) {
+            const currentSubBatch = uniqueDocs.slice(i, i + 500);
+            const batch = writeBatch(db);
+            currentSubBatch.forEach((docSnap: any) => {
+              if (docSnap.data()?.userId !== transfer.buyerId) {
+                batch.update(doc(db, collName, docSnap.id), { userId: transfer.buyerId });
+              }
+            });
+            await batch.commit();
+          }
+        }
+      }
+
+      // 5. Create finance transactions for both
       // Seller: Venta
       await addDoc(collection(db, 'finance_transactions'), {
         type: 'Venta',
-        amount: transfer.price,
+        amount: Number(transfer.price || 0),
         date: serverTimestamp(),
         category: 'Venta de Animal',
         description: `Venta de ${transfer.animalName} (${transfer.animalArete})`,
@@ -2932,7 +3050,7 @@ export default function App() {
       // Buyer: Compra
       await addDoc(collection(db, 'finance_transactions'), {
         type: 'Compra',
-        amount: transfer.price,
+        amount: Number(transfer.price || 0),
         date: serverTimestamp(),
         category: 'Compra de Animal',
         description: `Compra de ${transfer.animalName} (${transfer.animalArete})`,
@@ -2941,7 +3059,7 @@ export default function App() {
         createdAt: serverTimestamp()
       });
 
-      // 4. Notify buyer
+      // 6. Notify buyer
       await addDoc(collection(db, 'notifications'), {
         userId: transfer.buyerId,
         title: 'Transferencia Completada',
@@ -2988,7 +3106,7 @@ export default function App() {
     if (!user) return;
 
     const animalsUnsubscribe = onSnapshot(
-      query(collection(db, 'animals'), where('id_propietario', '==', user.uid)),
+      query(collection(db, 'animals'), where('id_propietario', 'in', [user.uid, `vendido_${user.uid}`]), orderBy('createdAt', 'desc'), limit(500)),
       (snapshot) => {
         setAnimals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Animal)));
       },
@@ -2996,20 +3114,16 @@ export default function App() {
     );
 
     const notificationsUnsubscribe = onSnapshot(
-      query(collection(db, 'notifications'), where('userId', '==', user.uid)),
+      query(collection(db, 'notifications'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(50)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Notification));
-        setNotifications(data.sort((a, b) => {
-          const dateA = a.date?.toDate ? a.date.toDate() : (a.date ? new Date(a.date) : new Date());
-          const dateB = b.date?.toDate ? b.date.toDate() : (b.date ? new Date(b.date) : new Date());
-          return dateB.getTime() - dateA.getTime();
-        }));
+        setNotifications(data);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'notifications', auth)
     );
 
     const potrerosUnsubscribe = onSnapshot(
-      query(collection(db, 'potreros'), where('userId', '==', user.uid)),
+      query(collection(db, 'potreros'), where('userId', '==', user.uid), limit(100)),
       (snapshot) => {
         setPotreros(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Potrero)));
       },
@@ -3017,27 +3131,19 @@ export default function App() {
     );
 
     const healthUnsubscribe = onSnapshot(
-      query(collection(db, 'health_events'), where('userId', '==', user.uid)),
+      query(collection(db, 'health_events'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1000)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HealthEvent));
-        setHealthEvents(data.sort((a, b) => {
-          const dateA = a.date?.toDate ? a.date.toDate() : (a.date ? new Date(a.date) : new Date());
-          const dateB = b.date?.toDate ? b.date.toDate() : (b.date ? new Date(b.date) : new Date());
-          return dateB.getTime() - dateA.getTime();
-        }));
+        setHealthEvents(data);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'health_events', auth)
     );
 
     const feedingUnsubscribe = onSnapshot(
-      query(collection(db, 'feeding_records'), where('userId', '==', user.uid)),
+      query(collection(db, 'feeding_records'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1000)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FeedingRecord));
-        setFeedingRecords(data.sort((a, b) => {
-          const dateA = a.date?.toDate ? a.date.toDate() : (a.date ? new Date(a.date) : new Date());
-          const dateB = b.date?.toDate ? b.date.toDate() : (b.date ? new Date(b.date) : new Date());
-          return dateB.getTime() - dateA.getTime();
-        }));
+        setFeedingRecords(data);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'feeding_records', auth)
     );
@@ -3051,9 +3157,11 @@ export default function App() {
           setLocalProfile(data);
           
           // Check if profile is complete
+          // We only show the modal if it's NOT complete AND the user hasn't dismissed it
           const isComplete = data.displayName && data.phone && data.ranchName && 
-                            data.curp && data.rfc && data.upp && data.state && data.municipality;
-          if (!isComplete) {
+                            data.curp && data.municipality;
+          
+          if (!isComplete && !hasDismissedProfileModal) {
             setIsProfileModalOpen(true);
           } else {
             setIsProfileModalOpen(false);
@@ -3087,33 +3195,25 @@ export default function App() {
     );
 
     const reproductionUnsubscribe = onSnapshot(
-      query(collection(db, 'reproduction_events'), where('userId', '==', user.uid)),
+      query(collection(db, 'reproduction_events'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1000)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ReproductionEvent));
-        setReproductionEvents(data.sort((a, b) => {
-          const dateA = a.date?.toDate ? a.date.toDate() : (a.date ? new Date(a.date) : new Date());
-          const dateB = b.date?.toDate ? b.date.toDate() : (b.date ? new Date(b.date) : new Date());
-          return dateB.getTime() - dateA.getTime();
-        }));
+        setReproductionEvents(data);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'reproduction_events', auth)
     );
 
     const productionUnsubscribe = onSnapshot(
-      query(collection(db, 'production_records'), where('userId', '==', user.uid)),
+      query(collection(db, 'production_records'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1000)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductionRecord));
-        setProductionRecords(data.sort((a, b) => {
-          const dateA = a.date?.toDate ? a.date.toDate() : (a.date ? new Date(a.date) : new Date());
-          const dateB = b.date?.toDate ? b.date.toDate() : (b.date ? new Date(b.date) : new Date());
-          return dateB.getTime() - dateA.getTime();
-        }));
+        setProductionRecords(data);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'production_records', auth)
     );
 
     const publicProfilesUnsubscribe = onSnapshot(
-      collection(db, 'public_profiles'),
+      query(collection(db, 'public_profiles'), limit(100)),
       (snapshot) => {
         setPublicProfiles(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PublicProfile)).filter(p => p.id !== user.uid));
       },
@@ -3121,7 +3221,7 @@ export default function App() {
     );
 
     const chatsUnsubscribe = onSnapshot(
-      query(collection(db, 'chats'), where('participants', 'array-contains', user.uid)),
+      query(collection(db, 'chats'), where('participants', 'array-contains', user.uid), limit(50)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Chat));
         setChats(data.sort((a, b) => {
@@ -3134,20 +3234,16 @@ export default function App() {
     );
 
     const financeUnsubscribe = onSnapshot(
-      query(collection(db, 'finance_transactions'), where('userId', '==', user.uid)),
+      query(collection(db, 'finance_transactions'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(200)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceTransaction));
-        setFinanceTransactions(data.sort((a, b) => {
-          const dateA = a.date?.toDate ? a.date.toDate() : (a.date ? new Date(a.date) : new Date());
-          const dateB = b.date?.toDate ? b.date.toDate() : (b.date ? new Date(b.date) : new Date());
-          return dateB.getTime() - dateA.getTime();
-        }));
+        setFinanceTransactions(data);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'finance_transactions', auth)
     );
 
     const transfersUnsubscribe = onSnapshot(
-      query(collection(db, 'animal_transfers'), where('participants', 'array-contains', user.uid)),
+      query(collection(db, 'animal_transfers'), where('participants', 'array-contains', user.uid), orderBy('updatedAt', 'desc'), limit(50)),
       (snapshot) => {
         setAnimalTransfers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AnimalTransfer)));
       },
@@ -3155,7 +3251,7 @@ export default function App() {
     );
 
     const inventoryUnsubscribe = onSnapshot(
-      query(collection(db, 'inventory'), where('userId', '==', user.uid)),
+      query(collection(db, 'inventory'), where('userId', '==', user.uid), orderBy('updatedAt', 'desc'), limit(200)),
       (snapshot) => {
         setInventory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
       },
@@ -3163,7 +3259,7 @@ export default function App() {
     );
 
     const tasksUnsubscribe = onSnapshot(
-      query(collection(db, 'tasks'), where('userId', '==', user.uid)),
+      query(collection(db, 'tasks'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(200)),
       (snapshot) => {
         setTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task)));
       },
@@ -3171,15 +3267,15 @@ export default function App() {
     );
 
     const marketplaceUnsubscribe = onSnapshot(
-      collection(db, 'marketplace'),
+      query(collection(db, 'marketplace_offers'), orderBy('createdAt', 'desc'), limit(50)),
       (snapshot) => {
         setMarketplaceOffers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MarketplaceOffer)));
       },
-      (error) => handleFirestoreError(error, OperationType.GET, 'marketplace', auth)
+      (error) => handleFirestoreError(error, OperationType.GET, 'marketplace_offers', auth)
     );
 
     const reviewsUnsubscribe = onSnapshot(
-      collection(db, 'reviews'),
+      query(collection(db, 'reviews'), orderBy('createdAt', 'desc'), limit(50)),
       (snapshot) => {
         setReviews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Review)));
       },
@@ -3226,8 +3322,33 @@ export default function App() {
 
   const handleLogout = () => signOut(auth);
 
-  const markAsRead = async (id: string) => {
-    await updateDoc(doc(db, 'notifications', id), { read: true });
+  const markAsRead = async (notification: Notification) => {
+    if (!notification.read) {
+      await updateDoc(doc(db, 'notifications', notification.id), { read: true });
+    }
+
+    // Navigation logic based on notification type
+    if (notification.type === 'chat' && notification.chatId) {
+      const targetChat = chats.find(c => c.id === notification.chatId);
+      if (targetChat) {
+        setActiveChat(targetChat);
+        setIsChatOpen(true);
+        setActiveTab('community');
+        setShowNotifications(false);
+      }
+    } else if (notification.type === 'transfer') {
+      setActiveTab('community');
+      setShowNotifications(false);
+    } else if (notification.type === 'health') {
+      setActiveTab('sanidad');
+      setShowNotifications(false);
+    } else if (notification.type === 'feed') {
+      setActiveTab('alimentacion');
+      setShowNotifications(false);
+    } else if (notification.type === 'birth') {
+      setActiveTab('reproduccion');
+      setShowNotifications(false);
+    }
   };
 
   const handleUpdateProfile = async () => {
@@ -3238,6 +3359,11 @@ export default function App() {
         ...localProfile,
         updatedAt: serverTimestamp()
       });
+
+      // Mark as dismissed so it doesn't pop up again immediately
+      setHasDismissedProfileModal(true);
+      localStorage.setItem('hasDismissedProfileModal', 'true');
+      setIsProfileModalOpen(false);
 
       if (localProfile.isPublic) {
         await setDoc(doc(db, 'public_profiles', user.uid), {
@@ -3285,13 +3411,41 @@ export default function App() {
     setIsAddModalOpen(true);
   };
 
-  const handleUpdateAnimal = async (id: string, data: any) => {
-    if (!user) return;
+  const handleDeleteAnimal = async () => {
+    if (!user || !animalToDelete) return;
+    setIsDeleting(true);
     try {
-      await updateDoc(doc(db, 'animals', id), data);
+      await deleteDoc(doc(db, 'animals', animalToDelete.id));
+      
+      try {
+        await addDoc(collection(db, 'notifications'), {
+          userId: user.uid,
+          title: 'Registro Eliminado',
+          message: `El registro de ${animalToDelete.nombre} (${animalToDelete.id_arete}) ha sido eliminado permanentemente.`,
+          date: serverTimestamp(),
+          type: 'feed',
+          read: false
+        });
+      } catch (notifError) {
+        console.error("Error sending notification:", notifError);
+      }
+      
+      setIsDeleteConfirmOpen(false);
       setIsAddModalOpen(false);
       setEditingAnimal(null);
-      
+      setAnimalToDelete(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `animals/${animalToDelete.id}`, auth);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleUpdateAnimal = async (id: string, data: any) => {
+    if (!user) return;
+    await updateDoc(doc(db, 'animals', id), data);
+    
+    try {
       await addDoc(collection(db, 'notifications'), {
         userId: user.uid,
         title: 'Registro Actualizado',
@@ -3300,22 +3454,33 @@ export default function App() {
         type: 'feed',
         read: false
       });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `animals/${id}`, auth);
+    } catch (notifError) {
+      console.error("Error sending notification:", notifError);
     }
   };
 
   const handleAddAnimal = async (data: any) => {
     if (!user) return;
     try {
-      await addDoc(collection(db, 'animals'), {
+      const animalRef = await addDoc(collection(db, 'animals'), {
         ...data,
         id_propietario: user.uid,
         createdAt: serverTimestamp()
       });
-      setIsAddModalOpen(false);
       
-      // Add a notification for the new record
+    if (data.precio && Number(data.precio) > 0) {
+      await addDoc(collection(db, 'finance_transactions'), {
+        userId: user.uid,
+        amount: Number(data.precio),
+        type: 'Compra',
+        date: serverTimestamp(),
+        category: 'Compra de Ganado',
+        description: `Registro de animal: ${data.nombre} (${data.id_arete})`,
+        animalId: animalRef.id,
+        createdAt: serverTimestamp()
+      });
+    }
+
       await addDoc(collection(db, 'notifications'), {
         userId: user.uid,
         title: 'Nuevo Registro',
@@ -3325,7 +3490,7 @@ export default function App() {
         read: false
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'animals/notifications', auth);
+      console.error("Error adding animal:", error);
     }
   };
 
@@ -3363,18 +3528,32 @@ export default function App() {
   const handleAddHealthEvent = async (data: any) => {
     if (!user) return;
     try {
-      await addDoc(collection(db, 'health_events'), {
+      const healthRef = await addDoc(collection(db, 'health_events'), {
         ...data,
         userId: user.uid,
         createdAt: serverTimestamp()
       });
       
+      // If there's a cost, create a finance transaction
+      if (data.cost && Number(data.cost) > 0) {
+        await addDoc(collection(db, 'finance_transactions'), {
+          type: 'Egreso',
+          amount: Number(data.cost),
+          date: data.date || serverTimestamp(),
+          category: 'Salud',
+          description: `Salud: ${data.type} - ${data.mode === 'grupal' ? data.potreroName : data.animalName}`,
+          relatedId: healthRef.id,
+          userId: user.uid,
+          createdAt: serverTimestamp()
+        });
+      }
+
       await addDoc(collection(db, 'notifications'), {
         userId: user.uid,
         title: 'Evento de Salud',
         message: data.mode === 'grupal' 
-          ? `Se ha registrado un evento de ${data.tipo} para el corral ${data.potreroName}.`
-          : `Se ha registrado un evento de ${data.tipo} para el animal ${data.animalName} (#${data.animalId}).`,
+          ? `Se ha registrado un evento de ${data.description || data.type} para el corral ${data.potreroName}.`
+          : `Se ha registrado un evento de ${data.description || data.type} para el animal ${data.animalName} (#${data.animalId}).`,
         date: serverTimestamp(),
         type: 'health',
         read: false
@@ -3433,12 +3612,26 @@ export default function App() {
   const handleAddFeedingRecord = async (data: any) => {
     if (!user) return;
     try {
-      await addDoc(collection(db, 'feeding_records'), {
+      const feedingRef = await addDoc(collection(db, 'feeding_records'), {
         ...data,
         userId: user.uid,
         createdAt: serverTimestamp()
       });
       
+      // If there's a cost, create a finance transaction
+      if (data.cost && Number(data.cost) > 0) {
+        await addDoc(collection(db, 'finance_transactions'), {
+          type: 'Egreso',
+          amount: Number(data.cost),
+          date: data.date || serverTimestamp(),
+          category: 'Alimentación',
+          description: `Alimento: ${data.foodType} para ${data.potreroNombre}`,
+          relatedId: feedingRef.id,
+          userId: user.uid,
+          createdAt: serverTimestamp()
+        });
+      }
+
       await addDoc(collection(db, 'notifications'), {
         userId: user.uid,
         title: 'Registro de Alimentación',
@@ -3455,12 +3648,26 @@ export default function App() {
   const handleAddReproductionEvent = async (data: any) => {
     if (!user) return;
     try {
-      await addDoc(collection(db, 'reproduction_events'), {
+      const reproRef = await addDoc(collection(db, 'reproduction_events'), {
         ...data,
         userId: user.uid,
         createdAt: serverTimestamp()
       });
       
+      // If there's a cost, create a finance transaction
+      if (data.cost && Number(data.cost) > 0) {
+        await addDoc(collection(db, 'finance_transactions'), {
+          type: 'Egreso',
+          amount: Number(data.cost),
+          date: data.date || serverTimestamp(),
+          category: 'Reproducción',
+          description: `Evento: ${data.type} - ${data.animalName}`,
+          relatedId: reproRef.id,
+          userId: user.uid,
+          createdAt: serverTimestamp()
+        });
+      }
+
       await addDoc(collection(db, 'notifications'), {
         userId: user.uid,
         title: 'Evento Reproductivo',
@@ -3487,14 +3694,28 @@ export default function App() {
     }
   };
 
-  const handleAddInventoryItem = async (data: Partial<InventoryItem>) => {
+  const handleAddInventoryItem = async (data: Partial<InventoryItem> & { cost?: number }) => {
     if (!user) return;
     try {
-      await addDoc(collection(db, 'inventory'), {
+      const inventoryRef = await addDoc(collection(db, 'inventory'), {
         ...data,
         userId: user.uid,
         updatedAt: serverTimestamp()
       });
+
+      // If there's a cost, create a finance transaction
+      if (data.cost && Number(data.cost) > 0) {
+        await addDoc(collection(db, 'finance_transactions'), {
+          type: 'Egreso',
+          amount: Number(data.cost),
+          date: serverTimestamp(),
+          category: 'Inventario',
+          description: `Compra de Insumo: ${data.nombre}`,
+          relatedId: inventoryRef.id,
+          userId: user.uid,
+          createdAt: serverTimestamp()
+        });
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'inventory', auth);
     }
@@ -3590,6 +3811,49 @@ export default function App() {
     }
   };
 
+  const handleAddMarketplaceOffer = async (animal: Animal, price: number, description: string) => {
+    if (!user) return;
+    
+    if (!userProfile || !userProfile.ranchName) {
+      setActiveToast({
+        title: 'Perfil Incompleto',
+        message: 'Por favor, completa tu perfil de ganadero antes de publicar en el mercado.',
+        type: 'error'
+      });
+      setTimeout(() => setActiveToast(null), 5000);
+      setIsProfileModalOpen(true);
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'marketplace_offers'), {
+        animalId: animal.id,
+        animalName: animal.nombre,
+        animalArete: animal.id_arete,
+        price,
+        description,
+        sellerId: user.uid,
+        sellerName: userProfile.ranchName || user.displayName || 'Ganadero',
+        photoUrl: animal.photoUrl || null,
+        createdAt: serverTimestamp()
+      });
+
+      // Update animal status/price
+      await updateDoc(doc(db, 'animals', animal.id), {
+        precio: price
+      });
+
+      setActiveToast({
+        title: 'Oferta Publicada',
+        message: 'Tu animal ya está disponible en el mercado.',
+        type: 'success'
+      });
+      setTimeout(() => setActiveToast(null), 3000);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'marketplace_offers', auth);
+    }
+  };
+
   const handleAddFinanceTransaction = async (data: any) => {
     if (!user) return;
     try {
@@ -3598,6 +3862,23 @@ export default function App() {
         userId: user.uid,
         createdAt: serverTimestamp()
       });
+
+      // Si es una Venta y tiene un animalId, marcar el animal como vendido
+      if (data.type === 'Venta' && data.animalId) {
+        await updateDoc(doc(db, 'animals', data.animalId), {
+          id_propietario: `vendido_${user.uid}`,
+          status_venta: 'vendido_directo',
+          precio_venta: data.amount,
+          fecha_venta: data.date instanceof Date ? data.date : new Date(data.date)
+        });
+        
+        setActiveToast({
+          title: 'Venta Registrada',
+          message: 'La transacción ha sido guardada y el animal marcado como vendido.',
+          type: 'success'
+        });
+        setTimeout(() => setActiveToast(null), 3000);
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'finance_transactions', auth);
     }
@@ -3644,16 +3925,44 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-primary">
-        <motion.div 
-          animate={{ scale: [1, 1.1, 1], opacity: [0.7, 1, 0.7] }}
-          transition={{ repeat: Infinity, duration: 2 }}
-          className="flex flex-col items-center gap-6"
-        >
-          <TlanextliLogo light className="scale-150" />
-          <div className="w-48 h-1 bg-white/20 rounded-full overflow-hidden">
+      <div className="h-screen relative flex items-center justify-center overflow-hidden">
+        {/* Crystal Liquid Gradient Background */}
+        <div className="absolute inset-0 z-0 bg-[#f8fafc]">
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
             <motion.div 
-              className="h-full bg-accent"
+              animate={{ 
+                scale: [1, 1.4, 1],
+                x: [-50, 50, -50],
+                y: [-30, 30, -30],
+                rotate: [0, 45, 0]
+              }}
+              transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute -top-[10%] -left-[10%] w-[80%] h-[80%] bg-[#006341]/40 rounded-full blur-[120px]"
+            />
+            <motion.div 
+              animate={{ 
+                scale: [1.4, 1, 1.4],
+                x: [50, -50, 50],
+                y: [30, -30, 30],
+                rotate: [0, -45, 0]
+              }}
+              transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute -bottom-[10%] -right-[10%] w-[80%] h-[80%] bg-[#c8102e]/40 rounded-full blur-[120px]"
+            />
+          </div>
+          <div className="absolute inset-0 bg-gradient-to-br from-[#006341]/40 via-white/20 to-[#c8102e]/40 backdrop-blur-[60px]" />
+          <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]" />
+        </div>
+
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="relative z-10 flex flex-col items-center gap-8"
+        >
+          <TlanextliLogo size="lg" />
+          <div className="w-48 h-1.5 bg-primary/10 rounded-full overflow-hidden">
+            <motion.div 
+              className="h-full bg-primary"
               animate={{ x: [-200, 200] }}
               transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
             />
@@ -3666,20 +3975,60 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen relative flex flex-col items-center justify-end p-8 overflow-hidden">
-        {/* Background Image */}
-        <div className="absolute inset-0 z-0">
+        {/* Mexican Flag */}
+        <div className="absolute top-8 right-8 z-20 shadow-xl overflow-hidden border border-white/20">
           <img 
-            src="https://images.unsplash.com/photo-1546445317-29f4545e9d53?auto=format&fit=crop&q=80&w=1080&h=1920" 
-            alt="Cattle" 
-            className="w-full h-full object-cover brightness-75"
+            src="https://flagcdn.com/w160/mx.png" 
+            alt="México" 
+            className="w-20 sm:w-28 h-auto object-cover"
             referrerPolicy="no-referrer"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+        </div>
+
+        {/* Crystal Liquid Gradient Background */}
+        <div className="absolute inset-0 z-0 bg-[#f8fafc]">
+          {/* Animated Liquid Blobs for "Crystal Liquid" effect */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <motion.div 
+              animate={{ 
+                scale: [1, 1.4, 1],
+                x: [-50, 50, -50],
+                y: [-30, 30, -30],
+                rotate: [0, 45, 0]
+              }}
+              transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute -top-[10%] -left-[10%] w-[80%] h-[80%] bg-[#006341]/40 rounded-full blur-[120px]"
+            />
+            <motion.div 
+              animate={{ 
+                scale: [1.4, 1, 1.4],
+                x: [50, -50, 50],
+                y: [30, -30, 30],
+                rotate: [0, -45, 0]
+              }}
+              transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute -bottom-[10%] -right-[10%] w-[80%] h-[80%] bg-[#c8102e]/40 rounded-full blur-[120px]"
+            />
+            <motion.div 
+              animate={{ 
+                opacity: [0.3, 0.6, 0.3],
+                scale: [0.8, 1.1, 0.8]
+              }}
+              transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[60%] h-[60%] bg-white/50 rounded-full blur-[100px]"
+            />
+          </div>
+          
+          {/* Main Translucent Gradient Overlay */}
+          <div className="absolute inset-0 bg-gradient-to-br from-[#006341]/40 via-white/20 to-[#c8102e]/40 backdrop-blur-[60px]" />
+          
+          {/* Glass Noise Texture */}
+          <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]" />
         </div>
 
         <div className="relative z-10 w-full max-w-md space-y-12 mb-12">
           <div className="space-y-8">
-            <TlanextliLogo light className="scale-150 origin-left" />
+            <TlanextliLogo light size="lg" />
             <div className="space-y-4">
               <h1 className="text-5xl sm:text-6xl font-black text-white leading-tight font-display">
                 GESTIÓN<br />
@@ -3703,15 +4052,20 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background pb-24 lg:pb-0 lg:pl-72">
+    <ErrorBoundary>
+      <div className="min-h-screen bg-background pb-24 lg:pb-0 lg:pl-72">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-72 bg-white border-r border-gray-100 fixed inset-y-0 left-0 p-8 z-50">
-        <TlanextliLogo className="mb-12" />
-        
+        <button 
+          onClick={() => setActiveTab('inicio')}
+          className="mb-12 hover:opacity-80 transition-opacity"
+        >
+          <TlanextliLogo size="md" />
+        </button>
         <nav className="flex-1 overflow-y-auto no-scrollbar space-y-1">
           <SidebarItem icon={LayoutDashboard} label="Inicio" active={activeTab === 'inicio'} onClick={() => setActiveTab('inicio')} />
           <SidebarItem icon={Users} label="Ganado" active={activeTab === 'ganado'} onClick={() => setActiveTab('ganado')} />
-          <SidebarItem icon={Map} label="Corrales" active={activeTab === 'corrales'} onClick={() => setActiveTab('corrales')} />
+          <SidebarItem icon={MapIcon} label="Corrales" active={activeTab === 'corrales'} onClick={() => setActiveTab('corrales')} />
           <SidebarItem icon={Stethoscope} label="Sanidad" active={activeTab === 'sanidad'} onClick={() => setActiveTab('sanidad')} />
           <SidebarItem icon={Wheat} label="Alimentación" active={activeTab === 'feeding'} onClick={() => setActiveTab('feeding')} />
           <SidebarItem icon={Dna} label="Reproducción" active={activeTab === 'reproduction'} onClick={() => setActiveTab('reproduction')} />
@@ -3719,7 +4073,8 @@ export default function App() {
           <SidebarItem icon={Database} label="Inventario" active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} />
           <SidebarItem icon={Calendar} label="Calendario" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
           <SidebarItem icon={PieChartIcon} label="Reportes" active={activeTab === 'reportes'} onClick={() => setActiveTab('reportes')} />
-          <SidebarItem icon={Users2} label="Comunidad" active={activeTab === 'community'} onClick={() => setActiveTab('community')} badge={unreadMessagesCount} />
+          <SidebarItem icon={Wallet} label="Finanzas" active={activeTab === 'finances'} onClick={() => setActiveTab('finances')} />
+          <SidebarItem icon={Users2} label="Comunidad" active={activeTab === 'community'} onClick={() => setActiveTab('community')} badge={activeRanchersCount} />
           <SidebarItem icon={User} label="Perfil" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
         </nav>
 
@@ -3742,16 +4097,9 @@ export default function App() {
       </aside>
 
       {/* Mobile Header */}
-      <header className="lg:hidden bg-white px-6 py-5 flex justify-between items-center sticky top-0 z-40 border-b border-gray-100">
-        <TlanextliLogo />
-        <button 
-          onClick={() => setActiveTab('notifications')}
-          className="relative p-2.5 rounded-2xl bg-gray-50 text-primary hover:bg-primary/5 transition-colors"
-        >
-          <Bell size={22} />
-          {notifications.filter(n => !n.read).length > 0 && (
-            <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-accent rounded-full border-2 border-white" />
-          )}
+      <header className="lg:hidden bg-white px-6 py-4 flex justify-center items-center sticky top-0 z-40 border-b border-gray-100">
+        <button onClick={() => setActiveTab('inicio')} className="hover:opacity-80 transition-opacity">
+          <TlanextliLogo size="sm" className="justify-center" />
         </button>
       </header>
 
@@ -3780,12 +4128,19 @@ export default function App() {
                   </div>
                   
                   <div className="space-y-1">
-                    <p className="text-white/70 font-medium">Buenas noches</p>
+                    <p className="text-white/70 font-medium">
+                      {(() => {
+                        const hour = new Date().getHours();
+                        if (hour >= 5 && hour < 12) return 'Buenos días';
+                        if (hour >= 12 && hour < 19) return 'Buenas tardes';
+                        return 'Buenas noches';
+                      })()}
+                    </p>
                     <h2 className="text-3xl font-black font-display tracking-tight">Ganader@</h2>
                   </div>
 
                   <div className="mt-12 text-center">
-                    <p className="text-6xl sm:text-7xl font-black font-display tracking-tighter">{animals.length}</p>
+                    <p className="text-6xl sm:text-7xl font-black font-display tracking-tighter">{activeHealthStats.total}</p>
                     <p className="text-white/60 font-bold uppercase tracking-[0.2em] text-xs mt-2">animales en el hato</p>
                   </div>
 
@@ -3793,28 +4148,28 @@ export default function App() {
                     <div className="bg-white/10 rounded-2xl p-3 text-center backdrop-blur-md">
                       <div className="flex flex-col items-center gap-1">
                         <Users size={16} className="text-white/60" />
-                        <p className="text-lg font-black">{animals.filter(a => a.sexo === 'M').length}</p>
+                        <p className="text-lg font-black">{activeAnimals.filter(a => a.sexo === 'M').length}</p>
                         <p className="text-[8px] font-bold uppercase tracking-widest text-white/40">Machos</p>
                       </div>
                     </div>
                     <div className="bg-white/10 rounded-2xl p-3 text-center backdrop-blur-md">
                       <div className="flex flex-col items-center gap-1">
                         <Users size={16} className="text-white/60" />
-                        <p className="text-lg font-black">{animals.filter(a => a.sexo === 'H').length}</p>
+                        <p className="text-lg font-black">{activeAnimals.filter(a => a.sexo === 'H').length}</p>
                         <p className="text-[8px] font-bold uppercase tracking-widest text-white/40">Hembras</p>
                       </div>
                     </div>
                     <div className="bg-white/10 rounded-2xl p-3 text-center backdrop-blur-md">
                       <div className="flex flex-col items-center gap-1">
                         <Milk size={16} className="text-white/60" />
-                        <p className="text-lg font-black">{animals.filter(a => a.tipo_produccion === 'Leche').length}</p>
+                        <p className="text-lg font-black">{activeAnimals.filter(a => a.tipo_produccion === 'Leche').length}</p>
                         <p className="text-[8px] font-bold uppercase tracking-widest text-white/40">Lecheras</p>
                       </div>
                     </div>
                     <div className="bg-white/10 rounded-2xl p-3 text-center backdrop-blur-md">
                       <div className="flex flex-col items-center gap-1">
                         <AlertCircle size={16} className="text-white/60" />
-                        <p className="text-lg font-black">{healthEvents.filter(e => e.type === 'Enfermedad').length}</p>
+                        <p className="text-lg font-black">{activeHealthStats.sick}</p>
                         <p className="text-[8px] font-bold uppercase tracking-widest text-white/40">Enfermos</p>
                       </div>
                     </div>
@@ -3863,6 +4218,12 @@ export default function App() {
                       </div>
                       <span className="text-[10px] font-bold text-gray-600">Inventario</span>
                     </button>
+                    <button onClick={() => setIsScannerModalOpen(true)} className="quick-action-btn">
+                      <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+                        <Camera size={24} />
+                      </div>
+                      <span className="text-[10px] font-bold text-gray-600">Escanear QR</span>
+                    </button>
                     <button onClick={() => setActiveTab('reportes')} className="quick-action-btn">
                       <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
                         <FileText size={24} />
@@ -3889,17 +4250,17 @@ export default function App() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="stat-card border-b-4 border-b-green-500">
                       <CheckCircle className="text-green-500 mb-2" size={20} />
-                      <p className="text-3xl font-black text-primary">{animals.length - healthEvents.filter(e => e.type === 'Enfermedad').length}</p>
+                      <p className="text-3xl font-black text-primary">{activeHealthStats.healthy}</p>
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sanos</p>
                     </div>
                     <div className="stat-card border-b-4 border-b-red-500">
                       <AlertCircle className="text-red-500 mb-2" size={20} />
-                      <p className="text-3xl font-black text-primary">{healthEvents.filter(e => e.type === 'Enfermedad').length}</p>
+                      <p className="text-3xl font-black text-primary">{activeHealthStats.sick}</p>
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Enfermos</p>
                     </div>
                     <div className="stat-card border-b-4 border-b-orange-500">
                       <CheckCircle2 className="text-orange-500 mb-2" size={20} />
-                      <p className="text-3xl font-black text-primary">{healthEvents.filter(e => e.type === 'Vacunación').length}</p>
+                      <p className="text-3xl font-black text-primary">{activeHealthStats.vaccinations}</p>
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Vacunación</p>
                     </div>
                   </div>
@@ -3918,12 +4279,21 @@ export default function App() {
                 <div className="flex flex-col gap-6">
                   <div className="flex justify-between items-center px-2">
                     <h2 className="text-3xl font-black text-primary tracking-tight font-display">Ganado</h2>
-                    <button 
-                      onClick={() => openAddModal()}
-                      className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/20"
-                    >
-                      <Plus size={24} />
-                    </button>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setIsScannerModalOpen(true)}
+                        className="w-12 h-12 rounded-2xl bg-white border border-gray-100 text-primary flex items-center justify-center shadow-sm hover:bg-gray-50 transition-all"
+                        title="Escanear QR"
+                      >
+                        <Camera size={24} />
+                      </button>
+                      <button 
+                        onClick={() => openAddModal()}
+                        className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/20"
+                      >
+                        <Plus size={24} />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="relative px-2">
@@ -3975,18 +4345,14 @@ export default function App() {
                                           a.id_arete.toLowerCase().includes(searchTerm.toLowerCase());
                       
                       if (cattleFilter === 'venta') {
-                        return matchesSearch && a.precio && a.precio > 0;
+                        return matchesSearch && a.en_venta;
                       }
                       
                       if (cattleFilter === 'vendidos') {
-                        // For now, "Vendidos" will show animals that have a completed transfer where user was seller
-                        // But since they are removed from 'animals' list, we'd need to fetch them.
-                        // For simplicity, let's just filter if we had a 'status' field.
-                        // Since we don't, we'll just return false for now or implement a more complex logic.
-                        return false; 
+                        return matchesSearch && a.id_propietario?.startsWith('vendido_');
                       }
                       
-                      return matchesSearch;
+                      return matchesSearch && !a.id_propietario?.startsWith('vendido_');
                     })
                     .map(animal => (
                       <AnimalCard 
@@ -4003,6 +4369,17 @@ export default function App() {
                           e.stopPropagation();
                           setQrAnimal(animal);
                           setIsQrModalOpen(true);
+                          fetchAnimalHistory(animal.id);
+                        }}
+                        onSell={(e) => {
+                          e.stopPropagation();
+                          setMarketplaceAnimal(animal);
+                          setIsMarketplaceModalOpen(true);
+                        }}
+                        onDelete={(e) => {
+                          e.stopPropagation();
+                          setAnimalToDelete(animal);
+                          setIsDeleteConfirmOpen(true);
                         }}
                       />
                     ))}
@@ -4039,7 +4416,7 @@ export default function App() {
                   )}
                 </div>
                 
-                {animals.length === 0 && (
+                {activeAnimals.length === 0 && (
                   <div className="text-center py-24 bg-white rounded-[2.5rem] border border-dashed border-gray-200">
                     <div className="w-20 h-20 rounded-full bg-gray-50 flex items-center justify-center mx-auto mb-6">
                       <Users size={40} className="text-gray-200" />
@@ -4076,11 +4453,11 @@ export default function App() {
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Corrales</p>
                   </div>
                   <div className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm text-center">
-                    <p className="text-3xl font-black text-secondary">{animals.filter(a => a.id_potrero).length}</p>
+                    <p className="text-3xl font-black text-secondary">{activeAnimals.filter(a => a.id_potrero).length}</p>
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Ubicados</p>
                   </div>
                   <div className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm text-center">
-                    <p className="text-3xl font-black text-red-500">{animals.filter(a => !a.id_potrero).length}</p>
+                    <p className="text-3xl font-black text-red-500">{activeAnimals.filter(a => !a.id_potrero).length}</p>
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Sin ubicar</p>
                   </div>
                 </div>
@@ -4088,7 +4465,7 @@ export default function App() {
                 {/* Potreros List */}
                 <div className="space-y-4 px-2">
                   {potreros.map(potrero => {
-                    const animalCount = animals.filter(a => a.id_potrero === potrero.id).length;
+                    const animalCount = activeAnimals.filter(a => a.id_potrero === potrero.id).length;
                     const freeSpace = potrero.capacidad - animalCount;
                     const occupancyPercent = (animalCount / potrero.capacidad) * 100;
 
@@ -4097,7 +4474,7 @@ export default function App() {
                         <div className="flex justify-between items-start">
                           <div className="flex items-center gap-4">
                             <div className="w-12 h-12 rounded-2xl bg-secondary/10 text-secondary flex items-center justify-center">
-                              <Map size={24} />
+                              <MapIcon size={24} />
                             </div>
                             <div>
                               <h4 className="font-black text-primary text-lg">{potrero.nombre}</h4>
@@ -4166,32 +4543,24 @@ export default function App() {
               >
                 <div className="flex justify-between items-center px-2">
                   <h2 className="text-3xl font-black text-primary tracking-tight font-display">Sanidad</h2>
-                  <div className="flex gap-2">
-                    <button className="p-3 bg-white rounded-2xl border border-gray-100 text-primary shadow-sm">
-                      <Search size={20} />
-                    </button>
-                    <button className="p-3 bg-white rounded-2xl border border-gray-100 text-primary shadow-sm">
-                      <Settings size={20} />
-                    </button>
-                  </div>
                 </div>
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-2 gap-4 px-2">
                   <div className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
-                    <p className="text-4xl font-black text-primary">{animals.length}</p>
+                    <p className="text-4xl font-black text-primary">{activeHealthStats.total}</p>
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Total</p>
                   </div>
                   <div className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
-                    <p className="text-4xl font-black text-green-600">{animals.length - healthEvents.filter(e => e.type === 'Enfermedad').length}</p>
+                    <p className="text-4xl font-black text-green-600">{activeHealthStats.healthy}</p>
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Sanos</p>
                   </div>
                   <div className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
-                    <p className="text-4xl font-black text-red-600">{healthEvents.filter(e => e.type === 'Enfermedad').length}</p>
+                    <p className="text-4xl font-black text-red-600">{activeHealthStats.sick}</p>
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Enfermos</p>
                   </div>
                   <div className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
-                    <p className="text-4xl font-black text-orange-600">{healthEvents.filter(e => e.type === 'Vacunación').length}</p>
+                    <p className="text-4xl font-black text-orange-600">{activeHealthStats.vaccinations}</p>
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Vacunación</p>
                   </div>
                 </div>
@@ -4234,9 +4603,9 @@ export default function App() {
                             <Stethoscope size={24} />
                           </div>
                           <div className="flex-1">
-                            <p className="font-bold text-primary">{event.tipo}</p>
+                            <p className="font-bold text-primary">{event.type}</p>
                             <p className="text-xs text-gray-400 font-medium">
-                              {event.animalName || `Animal ID: ${event.animalId}`} • {format(event.date.toDate(), 'dd MMM yyyy', { locale: es })}
+                              {event.animalName || `Animal ID: ${event.animalId}`} • {safeFormatDate(event.date, 'dd MMM yyyy')}
                             </p>
                           </div>
                           <div className="text-right">
@@ -4285,18 +4654,27 @@ export default function App() {
                       <button onClick={() => setActiveTab('corrales')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors border-b border-gray-50">
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 rounded-xl bg-secondary/10 text-secondary flex items-center justify-center">
-                            <Map size={20} />
+                            <MapIcon size={20} />
                           </div>
                           <span className="font-bold text-primary">Potreros y Corrales</span>
                         </div>
                         <ChevronRight size={18} className="text-gray-300" />
                       </button>
-                      <button onClick={() => setActiveTab('reportes')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors">
+                      <button onClick={() => setActiveTab('reportes')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors border-b border-gray-50">
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
                             <PieChartIcon size={20} />
                           </div>
                           <span className="font-bold text-primary">Reportes y Estadísticas</span>
+                        </div>
+                        <ChevronRight size={18} className="text-gray-300" />
+                      </button>
+                      <button onClick={() => setActiveTab('finances')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-green-50 text-green-600 flex items-center justify-center">
+                            <Wallet size={20} />
+                          </div>
+                          <span className="font-bold text-primary">Finanzas y Gastos</span>
                         </div>
                         <ChevronRight size={18} className="text-gray-300" />
                       </button>
@@ -4322,15 +4700,6 @@ export default function App() {
                             <Dna size={20} />
                           </div>
                           <span className="font-bold text-primary">Reproducción</span>
-                        </div>
-                        <ChevronRight size={18} className="text-gray-300" />
-                      </button>
-                      <button onClick={() => setActiveTab('production')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors">
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                            <TrendingUp size={20} />
-                          </div>
-                          <span className="font-bold text-primary">Producción</span>
                         </div>
                         <ChevronRight size={18} className="text-gray-300" />
                       </button>
@@ -4392,8 +4761,8 @@ export default function App() {
                       <option>Este año</option>
                     </select>
                   </div>
-                  <div className="h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-64 w-full min-h-[256px]">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <BarChart data={monthlyData}>
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#9ca3af' }} />
                         <Tooltip 
@@ -4406,79 +4775,31 @@ export default function App() {
                   </div>
                 </section>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {/* Distribution Chart */}
-                  <section className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
-                    <h3 className="text-lg font-black text-primary">Distribución del Hato</h3>
-                    <div className="h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={[
-                              { name: 'Machos', value: animals.filter(a => a.sexo === 'M').length },
-                              { name: 'Hembras', value: animals.filter(a => a.sexo === 'H').length },
-                            ]}
-                            innerRadius={60}
-                            outerRadius={80}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            <Cell fill="var(--color-primary)" />
-                            <Cell fill="var(--color-accent)" />
-                          </Pie>
-                          <Tooltip />
-                          <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 700 }} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </section>
-
-                  {/* Financial Summary */}
-                  <section className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
-                    <h3 className="text-lg font-black text-primary">Resumen Financiero</h3>
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center p-4 bg-green-50 rounded-2xl">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center">
-                            <TrendingUp size={20} />
-                          </div>
-                          <span className="font-bold text-green-700">Ingresos</span>
-                        </div>
-                        <span className="text-lg font-black text-green-700">
-                          ${financeTransactions
-                            .filter(t => t.type === 'Venta' || t.type === 'Ingreso')
-                            .reduce((acc, curr) => acc + Number(curr.amount || 0), 0)
-                            .toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center p-4 bg-red-50 rounded-2xl">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-red-500 text-white flex items-center justify-center">
-                            <TrendingUp size={20} className="rotate-180" />
-                          </div>
-                          <span className="font-bold text-red-700">Egresos</span>
-                        </div>
-                        <span className="text-lg font-black text-red-700">
-                          ${financeTransactions
-                            .filter(t => t.type === 'Gasto' || t.type === 'Egreso' || t.type === 'Compra')
-                            .reduce((acc, curr) => acc + Number(curr.amount || 0), 0)
-                            .toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="pt-4 border-t border-gray-100 flex justify-between items-center px-2">
-                        <span className="font-bold text-gray-400 uppercase tracking-widest text-[10px]">Balance Neto</span>
-                        <span className="text-2xl font-black text-primary">
-                          ${(financeTransactions
-                            .filter(t => t.type === 'Venta' || t.type === 'Ingreso')
-                            .reduce((acc, curr) => acc + Number(curr.amount || 0), 0) - 
-                            financeTransactions
-                            .filter(t => t.type === 'Gasto' || t.type === 'Egreso' || t.type === 'Compra')
-                            .reduce((acc, curr) => acc + Number(curr.amount || 0), 0)).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                  </section>
-                </div>
+                {/* Distribution Chart */}
+                <section className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                  <h3 className="text-lg font-black text-primary">Distribución del Hato</h3>
+                  <div className="h-64 w-full min-h-[256px]">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: 'Machos', value: activeAnimals.filter(a => a.sexo === 'M').length },
+                            { name: 'Hembras', value: activeAnimals.filter(a => a.sexo === 'H').length },
+                          ]}
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          <Cell fill="var(--color-primary)" />
+                          <Cell fill="var(--color-accent)" />
+                        </Pie>
+                        <Tooltip />
+                        <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 700 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </section>
               </motion.div>
             )}
 
@@ -4542,6 +4863,7 @@ export default function App() {
                 marketplaceOffers={marketplaceOffers}
                 onBuyOffer={handleBuyOffer}
                 reviews={reviews}
+                onOpenAnimals={() => setIsAnimalsModalOpen(true)}
               />
             )}
 
@@ -4613,37 +4935,6 @@ export default function App() {
                           className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
                           placeholder="18 caracteres"
                           maxLength={18}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">RFC</label>
-                        <input 
-                          type="text" 
-                          value={localProfile.rfc || ''} 
-                          onChange={(e) => setLocalProfile({ ...localProfile, rfc: e.target.value.toUpperCase() })}
-                          className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
-                          placeholder="13 caracteres"
-                          maxLength={13}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">UPP (Unidad de Producción Pecuaria)</label>
-                        <input 
-                          type="text" 
-                          value={localProfile.upp || ''} 
-                          onChange={(e) => setLocalProfile({ ...localProfile, upp: e.target.value.toUpperCase() })}
-                          className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
-                          placeholder="Clave UPP"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Estado</label>
-                        <input 
-                          type="text" 
-                          value={localProfile.state || ''} 
-                          onChange={(e) => setLocalProfile({ ...localProfile, state: e.target.value })}
-                          className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
-                          placeholder="Ej: Zacatecas"
                         />
                       </div>
                       <div className="space-y-2">
@@ -4726,7 +5017,7 @@ export default function App() {
                 <div className="space-y-4 px-2">
                   {notifications.length > 0 ? (
                     notifications.map(n => (
-                      <NotificationItem key={n.id} notification={n} onRead={markAsRead} />
+                      <NotificationItem key={n.id} notification={n} onClick={markAsRead} />
                     ))
                   ) : (
                     <div className="text-center py-24 bg-white rounded-[2.5rem] border border-dashed border-gray-200">
@@ -4754,17 +5045,72 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 px-2">
                   <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Ingresos Totales</p>
-                    <p className="text-2xl font-black text-green-600">${financeTransactions.filter(t => t.type === 'Venta' || t.type === 'Ingreso').reduce((acc, curr) => acc + Number(curr.amount || 0), 0).toLocaleString()}</p>
+                    <p className="text-2xl font-black text-green-600">${financeTransactions.filter(t => t.type === 'Venta' || t.type === 'Ingreso').reduce((acc, curr) => {
+                      const val = Number(curr.amount || 0);
+                      return acc + (isNaN(val) ? 0 : val);
+                    }, 0).toLocaleString()}</p>
                   </div>
                   <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Egresos Totales</p>
-                    <p className="text-2xl font-black text-red-600">${financeTransactions.filter(t => t.type === 'Gasto' || t.type === 'Egreso' || t.type === 'Compra').reduce((acc, curr) => acc + Number(curr.amount || 0), 0).toLocaleString()}</p>
+                    <p className="text-2xl font-black text-red-600">${financeTransactions.filter(t => t.type === 'Gasto' || t.type === 'Egreso' || t.type === 'Compra').reduce((acc, curr) => {
+                      const val = Number(curr.amount || 0);
+                      return acc + (isNaN(val) ? 0 : val);
+                    }, 0).toLocaleString()}</p>
                   </div>
                   <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Balance</p>
-                    <p className="text-2xl font-black text-primary">${(financeTransactions.filter(t => t.type === 'Venta' || t.type === 'Ingreso').reduce((acc, curr) => acc + Number(curr.amount || 0), 0) - financeTransactions.filter(t => t.type === 'Gasto' || t.type === 'Egreso' || t.type === 'Compra').reduce((acc, curr) => acc + Number(curr.amount || 0), 0)).toLocaleString()}</p>
+                    <p className="text-2xl font-black text-primary">${(financeTransactions.filter(t => t.type === 'Venta' || t.type === 'Ingreso').reduce((acc, curr) => {
+                      const val = Number(curr.amount || 0);
+                      return acc + (isNaN(val) ? 0 : val);
+                    }, 0) - financeTransactions.filter(t => t.type === 'Gasto' || t.type === 'Egreso' || t.type === 'Compra').reduce((acc, curr) => {
+                      const val = Number(curr.amount || 0);
+                      return acc + (isNaN(val) ? 0 : val);
+                    }, 0)).toLocaleString()}</p>
                   </div>
                 </div>
+
+                {/* Gráfico de Gastos por Categoría */}
+                <div className="px-2">
+                  <div className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm">
+                    <h3 className="text-xl font-black text-primary tracking-tight mb-6">Gastos por Categoría</h3>
+                    <div className="h-[300px] w-full min-h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                        <BarChart data={expensesByCategory} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
+                          <XAxis 
+                            dataKey="name" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 600 }}
+                            dy={10}
+                          />
+                          <YAxis 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 600 }}
+                            tickFormatter={(value) => `$${value}`}
+                          />
+                          <Tooltip 
+                            cursor={{ fill: '#f8fafc' }}
+                            contentStyle={{ 
+                              borderRadius: '1.5rem', 
+                              border: 'none', 
+                              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+                              padding: '1rem'
+                            }}
+                            formatter={(value: number) => [`$${value.toLocaleString()}`, 'Gasto']}
+                          />
+                          <Bar 
+                            dataKey="value" 
+                            fill="#1b4332" 
+                            radius={[8, 8, 8, 8]} 
+                            barSize={40}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-4 px-2">
                   <h3 className="text-xl font-black text-primary tracking-tight">Transacciones Recientes</h3>
                   {financeTransactions.map(t => (
@@ -4775,11 +5121,18 @@ export default function App() {
                         </div>
                         <div>
                           <p className="font-bold text-primary">{t.category}</p>
-                          <p className="text-xs text-gray-400">{t.date?.toDate ? format(t.date.toDate(), 'PPP', { locale: es }) : format(new Date(t.date), 'PPP', { locale: es })}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-gray-400">{safeFormatDate(t.date)}</p>
+                            {t.animalId && (
+                              <span className="text-[10px] bg-primary/5 text-primary px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                                {animals.find(a => a.id === t.animalId)?.nombre || 'Animal'}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <p className={`text-lg font-black ${t.type === 'Venta' || t.type === 'Ingreso' ? 'text-green-600' : 'text-red-600'}`}>
-                        {t.type === 'Venta' || t.type === 'Ingreso' ? '+' : '-'}${t.amount.toLocaleString()}
+                        {t.type === 'Venta' || t.type === 'Ingreso' ? '+' : '-'}${(t.amount || 0).toLocaleString()}
                       </p>
                     </div>
                   ))}
@@ -4809,13 +5162,13 @@ export default function App() {
                             <Wheat size={20} />
                           </div>
                           <div>
-                            <p className="font-bold text-primary">{r.tipo_alimento}</p>
-                            <p className="text-xs text-gray-400">{r.date?.toDate ? format(r.date.toDate(), 'PPP', { locale: es }) : format(new Date(r.date), 'PPP', { locale: es })}</p>
+                            <p className="font-bold text-primary">{r.foodType}</p>
+                            <p className="text-xs text-gray-400">{safeFormatDate(r.date)}</p>
                           </div>
                         </div>
-                        <span className="status-badge bg-orange-50 text-orange-600">{r.cantidad} {r.unidad}</span>
+                        <span className="status-badge bg-orange-50 text-orange-600">{r.quantity} {r.unit}</span>
                       </div>
-                      <p className="text-sm text-gray-500 font-medium">{r.notas}</p>
+                      <p className="text-sm text-gray-500 font-medium">{r.potreroNombre}</p>
                     </div>
                   ))}
                 </div>
@@ -4848,7 +5201,7 @@ export default function App() {
                             <p className="text-xs text-gray-400">{e.animalName}</p>
                           </div>
                         </div>
-                        <span className="text-xs font-bold text-gray-400">{e.date?.toDate ? format(e.date.toDate(), 'PPP', { locale: es }) : format(new Date(e.date), 'PPP', { locale: es })}</span>
+                        <span className="text-xs font-bold text-gray-400">{safeFormatDate(e.date)}</span>
                       </div>
                       <p className="text-sm text-gray-500 font-medium">{e.notes}</p>
                     </div>
@@ -4880,7 +5233,7 @@ export default function App() {
                           </div>
                           <div>
                             <p className="font-bold text-primary">{r.type}</p>
-                            <p className="text-xs text-gray-400">{r.date?.toDate ? format(r.date.toDate(), 'PPP', { locale: es }) : format(new Date(r.date), 'PPP', { locale: es })}</p>
+                            <p className="text-xs text-gray-400">{safeFormatDate(r.date)}</p>
                           </div>
                         </div>
                         <span className="status-badge bg-blue-50 text-blue-600">{r.quantity} {r.unit}</span>
@@ -4896,35 +5249,119 @@ export default function App() {
 
             {activeTab === 'calendar' && (
               <motion.div key="calendar" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-8 pb-12">
-                <div className="flex items-center gap-4 px-2">
-                  <button onClick={() => setActiveTab('inicio')} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
-                    <ArrowLeftRight size={20} className="rotate-180" />
-                  </button>
-                  <h2 className="text-3xl font-black text-primary tracking-tight font-display">Calendario</h2>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-2">
+                  <div className="flex items-center gap-4">
+                    <button onClick={() => setActiveTab('inicio')} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                      <ArrowLeftRight size={20} className="rotate-180" />
+                    </button>
+                    <h2 className="text-3xl font-black text-primary tracking-tight font-display">Calendario</h2>
+                  </div>
+                  <div className="flex items-center gap-2 bg-white p-2 rounded-2xl border border-gray-100 shadow-sm">
+                    <button onClick={() => setCalendarDate(subMonths(calendarDate, 1))} className="p-2 hover:bg-gray-50 rounded-xl transition-colors">
+                      <ChevronRight size={20} className="rotate-180" />
+                    </button>
+                    <span className="px-4 font-black text-primary uppercase tracking-widest text-[10px] whitespace-nowrap">
+                      {format(calendarDate, 'MMMM yyyy', { locale: es })}
+                    </span>
+                    <button onClick={() => setCalendarDate(addMonths(calendarDate, 1))} className="p-2 hover:bg-gray-50 rounded-xl transition-colors">
+                      <ChevronRight size={20} />
+                    </button>
+                  </div>
                 </div>
-                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm mx-2">
+
+                <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] border border-gray-100 shadow-sm mx-2">
                   <div className="grid grid-cols-7 gap-2 mb-4">
                     {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((d, i) => (
                       <div key={`${d}-${i}`} className="text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">{d}</div>
                     ))}
                   </div>
                   <div className="grid grid-cols-7 gap-2">
-                    {Array.from({ length: 31 }).map((_, i) => (
-                      <div key={i} className={`aspect-square rounded-2xl flex items-center justify-center text-sm font-bold ${i + 1 === new Date().getDate() ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-gray-50 text-primary hover:bg-gray-100 transition-colors cursor-pointer'}`}>
-                        {i + 1}
-                      </div>
-                    ))}
+                    {(() => {
+                      const monthStart = startOfMonth(calendarDate);
+                      const monthEnd = endOfMonth(monthStart);
+                      const startDate = startOfWeek(monthStart);
+                      const endDate = endOfWeek(monthEnd);
+                      const days = eachDayOfInterval({ start: startDate, end: endDate });
+                      
+                      return days.map((day, i) => {
+                        const dayTasks = tasks.filter(t => isSameDay(t.date?.toDate ? t.date.toDate() : new Date(t.date), day));
+                        const isSelectedMonth = isSameMonth(day, monthStart);
+                        const isToday = isSameDay(day, new Date());
+                        
+                        return (
+                          <button 
+                            key={i} 
+                            onClick={() => {
+                              setTaskToEdit({ date: format(day, 'yyyy-MM-dd'), title: '', type: 'otro' });
+                              setIsTaskFormOpen(true);
+                            }}
+                            className={cn(
+                              "aspect-square rounded-2xl flex flex-col items-center justify-center text-sm font-bold transition-all relative group",
+                              !isSelectedMonth ? "opacity-20 pointer-events-none" : "hover:bg-gray-50",
+                              isToday ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-gray-50 text-primary"
+                            )}
+                          >
+                            <span>{format(day, 'd')}</span>
+                            {dayTasks.length > 0 && (
+                              <div className="absolute bottom-2 flex gap-0.5">
+                                {dayTasks.slice(0, 3).map(t => (
+                                  <div key={t.id} className={cn(
+                                    "w-1 h-1 rounded-full",
+                                    isToday ? "bg-white" : (
+                                      t.type === 'vacuna' ? "bg-red-400" : 
+                                      t.type === 'desparasitacion' ? "bg-blue-400" : 
+                                      t.type === 'parto' ? "bg-pink-400" : "bg-primary/40"
+                                    )
+                                  )} />
+                                ))}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      });
+                    })()}
                   </div>
+
                   <div className="mt-8 space-y-4">
-                    <h4 className="text-sm font-black text-primary uppercase tracking-widest">Eventos Próximos</h4>
-                    <div className="p-4 bg-primary/5 rounded-2xl border border-primary/10 flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center">
-                        <Activity size={20} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-primary">Vacunación General</p>
-                        <p className="text-[10px] text-primary/60 font-bold uppercase tracking-wider">Mañana • 08:00 AM</p>
-                      </div>
+                    <div className="flex justify-between items-center px-2">
+                      <h4 className="text-sm font-black text-primary uppercase tracking-widest">Tareas Próximas</h4>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      {tasks
+                        .filter(t => !t.completed && (t.date?.toDate ? t.date.toDate() : new Date(t.date)) >= startOfMonth(new Date()))
+                        .sort((a,b) => (a.date?.toDate ? a.date.toDate() : new Date(a.date)).getTime() - (b.date?.toDate ? b.date.toDate() : new Date(b.date)).getTime())
+                        .slice(0, 5)
+                        .map(task => (
+                          <div key={task.id} className="p-4 bg-gray-50 rounded-2xl border border-gray-100 flex items-center gap-4 group hover:bg-white hover:shadow-sm transition-all">
+                            <div className={cn(
+                              "w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg",
+                              task.type === 'vacuna' ? "bg-red-500 shadow-red-500/20" : 
+                              task.type === 'desparasitacion' ? "bg-blue-500 shadow-blue-500/20" : 
+                              task.type === 'parto' ? "bg-pink-500 shadow-pink-500/20" : "bg-primary shadow-primary/20"
+                            )}>
+                              {task.type === 'vacuna' ? <Stethoscope size={20} /> : 
+                               task.type === 'parto' ? <Baby size={20} /> : <Activity size={20} />}
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-bold text-primary">{task.title}</p>
+                              <p className="text-[10px] text-primary/60 font-bold uppercase tracking-wider">
+                                {format(task.date?.toDate ? task.date.toDate() : new Date(task.date), 'dd MMM yyyy', { locale: es })}
+                              </p>
+                            </div>
+                            <button 
+                              onClick={() => handleToggleTask(task.id, true)}
+                              className="p-2 text-gray-300 hover:text-green-500 transition-colors"
+                            >
+                              <CheckCircle2 size={20} />
+                            </button>
+                          </div>
+                      ))}
+                      {tasks.length === 0 && (
+                        <div className="text-center py-10 opacity-40">
+                          <p className="text-[10px] font-bold uppercase tracking-widest">No hay tareas pendientes</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -4940,8 +5377,8 @@ export default function App() {
                   <h2 className="text-3xl font-black text-primary tracking-tight font-display">Galería Finca</h2>
                 </div>
                 <div className="grid grid-cols-2 gap-4 px-2">
-                  {animals.filter(a => a.photoUrl).length > 0 ? (
-                    animals.filter(a => a.photoUrl).map(animal => (
+                  {activeAnimals.filter(a => a.photoUrl).length > 0 ? (
+                    activeAnimals.filter(a => a.photoUrl).map(animal => (
                       <div key={animal.id} className="aspect-square rounded-[2rem] overflow-hidden border border-gray-100 shadow-sm group relative">
                         <img 
                           src={animal.photoUrl} 
@@ -4983,9 +5420,6 @@ export default function App() {
                     <h2 className="text-4xl font-black text-primary tracking-tight font-display">Apoya el Proyecto</h2>
                     <p className="text-gray-500 font-medium max-w-xs mx-auto">Tlanextli es una herramienta gratuita para ganaderos. Tu apoyo nos ayuda a seguir mejorando.</p>
                   </div>
-                  <button className="w-full py-5 bg-primary text-white rounded-[2rem] font-black uppercase tracking-widest shadow-2xl shadow-primary/30 hover:scale-[1.02] active:scale-95 transition-all">
-                    Invítanos un Café
-                  </button>
                   <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em]">Gracias por ser parte de Tlanextli</p>
                 </div>
               </motion.div>
@@ -4998,7 +5432,7 @@ export default function App() {
           <BottomNavItem icon={LayoutDashboard} label="Inicio" active={activeTab === 'inicio'} onClick={() => setActiveTab('inicio')} />
           <BottomNavItem icon={Users} label="Ganado" active={activeTab === 'ganado'} onClick={() => setActiveTab('ganado')} />
           <BottomNavItem icon={Stethoscope} label="Sanidad" active={activeTab === 'sanidad'} onClick={() => setActiveTab('sanidad')} />
-          <BottomNavItem icon={Users2} label="Comunidad" active={activeTab === 'community'} onClick={() => setActiveTab('community')} badge={unreadMessagesCount} />
+          <BottomNavItem icon={Users2} label="Comunidad" active={activeTab === 'community'} onClick={() => setActiveTab('community')} badge={activeRanchersCount} />
           <BottomNavItem icon={MoreHorizontal} label="Más" active={activeTab === 'mas'} onClick={() => setActiveTab('mas')} />
         </nav>
       
@@ -5011,6 +5445,10 @@ export default function App() {
         }} 
         onAdd={handleAddAnimal}
         onUpdate={handleUpdateAnimal}
+        onDelete={(animal) => {
+          setAnimalToDelete(animal);
+          setIsDeleteConfirmOpen(true);
+        }}
         potreros={potreros}
         initialPotrero={modalInitialPotrero}
         editingAnimal={editingAnimal}
@@ -5034,12 +5472,16 @@ export default function App() {
           setQrAnimal(animal);
           setIsQrModalOpen(true);
         }}
+        onSell={(animal) => {
+          setMarketplaceAnimal(animal);
+          setIsMarketplaceModalOpen(true);
+        }}
       />
 
       <HealthEventModal 
         isOpen={isHealthModalOpen}
         onClose={() => setIsHealthModalOpen(false)}
-        animals={animals}
+        animals={activeAnimals}
         potreros={potreros}
         mode={healthModalMode}
         onAdd={handleAddHealthEvent}
@@ -5049,12 +5491,21 @@ export default function App() {
         isOpen={isFinanceModalOpen}
         onClose={() => setIsFinanceModalOpen(false)}
         onAdd={handleAddFinanceTransaction}
+        animals={activeAnimals}
       />
 
       <ComingSoonModal 
         isOpen={isComingSoonOpen}
         onClose={() => setIsComingSoonOpen(false)}
       />
+
+      {isScannerModalOpen && (
+        <QRScannerModal 
+          isOpen={isScannerModalOpen}
+          onClose={() => setIsScannerModalOpen(false)}
+          onScanSuccess={(id) => handleAnimalScan(id)}
+        />
+      )}
 
       <InventoryModal
         isOpen={isInventoryModalOpen}
@@ -5074,10 +5525,17 @@ export default function App() {
         onDeleteTask={handleDeleteTask}
       />
 
+      <TaskFormModal
+        isOpen={isTaskFormOpen}
+        onClose={() => setIsTaskFormOpen(false)}
+        onAdd={handleAddTask}
+        initialData={taskToEdit}
+      />
+
       <ReportsModal
         isOpen={isReportsModalOpen}
         onClose={() => setIsReportsModalOpen(false)}
-        animals={animals}
+        animals={activeAnimals}
         healthEvents={healthEvents}
         productionRecords={productionRecords}
         financeTransactions={financeTransactions}
@@ -5089,8 +5547,15 @@ export default function App() {
         onClose={() => {
           setIsQrModalOpen(false);
           setQrAnimal(null);
+          setScannedHistory(null);
         }}
         animal={qrAnimal}
+        healthEvents={healthEvents}
+        reproductionEvents={reproductionEvents}
+        productionRecords={productionRecords}
+        financeTransactions={financeTransactions}
+        scannedHistory={scannedHistory}
+        isLoading={loadingHistory}
       />
 
       <FeedingModal 
@@ -5103,14 +5568,14 @@ export default function App() {
       <ReproductionModal 
         isOpen={isReproductionModalOpen}
         onClose={() => setIsReproductionModalOpen(false)}
-        animals={animals}
+        animals={activeAnimals}
         onAdd={handleAddReproductionEvent}
       />
 
       <ProductionModal 
         isOpen={isProductionModalOpen}
         onClose={() => setIsProductionModalOpen(false)}
-        animals={animals}
+        animals={activeAnimals}
         onAdd={handleAddProductionRecord}
       />
 
@@ -5123,7 +5588,7 @@ export default function App() {
       <AssignAnimalsModal
         isOpen={isAssignModalOpen}
         onClose={() => setIsAssignModalOpen(false)}
-        animals={animals}
+        animals={activeAnimals}
         targetPotrero={targetPotrero}
         onAssign={handleAssignAnimals}
       />
@@ -5138,11 +5603,26 @@ export default function App() {
         isLoading={isResetting}
       />
 
+      <ConfirmModal 
+        isOpen={isDeleteConfirmOpen}
+        onClose={() => { setIsDeleteConfirmOpen(false); setAnimalToDelete(null); }}
+        onConfirm={handleDeleteAnimal}
+        title="¿Eliminar Registro de Animal?"
+        message={`¿Estás seguro de que deseas eliminar permanentemente a ${animalToDelete?.nombre} (${animalToDelete?.id_arete})? Esta acción no se puede deshacer y se borrará de la base de datos.`}
+        confirmText="Eliminar Permanentemente"
+        isLoading={isDeleting}
+      />
+
       <ProfileCompletionModal
         isOpen={isProfileModalOpen}
         profile={localProfile}
         onUpdate={setLocalProfile}
         onSave={handleUpdateProfile}
+        onDismiss={() => {
+          setHasDismissedProfileModal(true);
+          localStorage.setItem('hasDismissedProfileModal', 'true');
+          setIsProfileModalOpen(false);
+        }}
         isSaving={isSavingProfile}
       />
 
@@ -5164,6 +5644,16 @@ export default function App() {
         onInitiate={handleInitiateTransfer}
       />
 
+      <MarketplaceOfferModal 
+        isOpen={isMarketplaceModalOpen}
+        onClose={() => {
+          setIsMarketplaceModalOpen(false);
+          setMarketplaceAnimal(null);
+        }}
+        animal={marketplaceAnimal}
+        onPublish={handleAddMarketplaceOffer}
+      />
+
       <AnimatePresence>
         {activeToast && (
           <Toast 
@@ -5173,6 +5663,7 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+    </ErrorBoundary>
   );
 }
 
@@ -5181,7 +5672,23 @@ const Toast = ({ title, message, type, onClose }: { title: string, message: stri
     health: <HeartPulse className="text-red-600" size={20} />,
     birth: <Baby className="text-pink-600" size={20} />,
     feed: <Wheat className="text-[#2e7d32]" size={20} />,
-    chat: <MessageSquare className="text-blue-600" size={20} />
+    chat: <MessageSquare className="text-blue-600" size={20} />,
+    transfer: <ArrowLeftRight className="text-purple-600" size={20} />,
+    success: <CheckCircle2 className="text-green-600" size={20} />,
+    error: <AlertCircle className="text-red-600" size={20} />,
+    info: <Bell className="text-blue-500" size={20} />
+  };
+
+  const getBgColor = () => {
+    switch(type) {
+      case 'health': return "bg-red-50";
+      case 'birth': return "bg-pink-50";
+      case 'chat': return "bg-blue-50";
+      case 'transfer': return "bg-purple-50";
+      case 'success': return "bg-green-50";
+      case 'error': return "bg-red-50";
+      default: return "bg-[#2e7d32]/10";
+    }
   };
 
   return (
@@ -5189,39 +5696,35 @@ const Toast = ({ title, message, type, onClose }: { title: string, message: stri
       initial={{ y: -100, opacity: 0 }}
       animate={{ y: 20, opacity: 1 }}
       exit={{ y: -100, opacity: 0 }}
-      className="fixed top-0 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-md bg-white rounded-3xl shadow-2xl border border-gray-100 p-4 flex items-center gap-4 cursor-pointer"
+      className="fixed top-0 left-1/2 -translate-x-1/2 z-[2000] w-[90%] max-w-sm bg-white/90 backdrop-blur-xl rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-white/40 p-4 pl-5 flex items-center gap-4 cursor-pointer"
       onClick={onClose}
     >
-      <div className={cn(
-        "p-3 rounded-2xl",
-        type === 'chat' ? "bg-blue-50" : 
-        type === 'health' ? "bg-red-50" :
-        type === 'birth' ? "bg-pink-50" : "bg-[#2e7d32]/10"
-      )}>
-        {icons[type as keyof typeof icons] || <Bell size={20} />}
+      <div className={cn("p-3 rounded-2xl shrink-0", getBgColor())}>
+        {icons[type as keyof typeof icons] || <Bell size={20} className="text-primary" />}
       </div>
-      <div className="flex-1">
-        <h4 className="font-bold text-sm text-primary">{title}</h4>
-        <p className="text-xs text-gray-500 line-clamp-1">{message}</p>
+      <div className="flex-1 min-w-0 pr-2">
+        <h4 className="font-bold text-[13px] text-primary leading-tight truncate">{title}</h4>
+        <p className="text-[11px] text-gray-500 line-clamp-1 mt-0.5 leading-tight">{message}</p>
       </div>
-      <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl">
-        <X size={18} className="text-gray-400" />
+      <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-2.5 hover:bg-gray-100 rounded-xl transition-colors shrink-0">
+        <X size={16} className="text-gray-400" />
       </button>
     </motion.div>
   );
 };
 
-const ProfileCompletionModal = ({ isOpen, profile, onUpdate, onSave, isSaving }: { 
+const ProfileCompletionModal = ({ isOpen, profile, onUpdate, onSave, onDismiss, isSaving }: { 
   isOpen: boolean, 
   profile: UserProfile, 
   onUpdate: (profile: UserProfile) => void,
   onSave: () => void,
+  onDismiss: () => void,
   isSaving: boolean
 }) => {
   if (!isOpen) return null;
 
   const isComplete = profile.displayName && profile.phone && profile.ranchName && 
-                    profile.curp && profile.rfc && profile.upp && profile.state && profile.municipality;
+                    profile.curp && profile.municipality;
 
   return (
     <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
@@ -5231,6 +5734,13 @@ const ProfileCompletionModal = ({ isOpen, profile, onUpdate, onSave, isSaving }:
         animate={{ scale: 1, opacity: 1, y: 0 }} 
         className="relative bg-white w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
+        <button 
+          onClick={onDismiss}
+          className="absolute top-8 right-8 p-2 hover:bg-gray-100 rounded-xl transition-colors text-gray-400"
+        >
+          <X size={24} />
+        </button>
+
         <div className="mb-8 text-center">
           <div className="w-20 h-20 bg-primary/10 text-primary rounded-3xl flex items-center justify-center mx-auto mb-6">
             <User size={40} />
@@ -5280,37 +5790,6 @@ const ProfileCompletionModal = ({ isOpen, profile, onUpdate, onSave, isSaving }:
                 className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
                 placeholder="18 caracteres"
                 maxLength={18}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">RFC</label>
-              <input 
-                type="text" 
-                value={profile.rfc || ''} 
-                onChange={(e) => onUpdate({ ...profile, rfc: e.target.value.toUpperCase() })}
-                className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
-                placeholder="13 caracteres"
-                maxLength={13}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">UPP</label>
-              <input 
-                type="text" 
-                value={profile.upp || ''} 
-                onChange={(e) => onUpdate({ ...profile, upp: e.target.value.toUpperCase() })}
-                className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
-                placeholder="Clave UPP"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Estado</label>
-              <input 
-                type="text" 
-                value={profile.state || ''} 
-                onChange={(e) => onUpdate({ ...profile, state: e.target.value })}
-                className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
-                placeholder="Ej: Zacatecas"
               />
             </div>
             <div className="space-y-2">
@@ -5517,8 +5996,8 @@ const AssignAnimalsModal = ({ isOpen, onClose, animals, targetPotrero, onAssign 
 const PotreroFormModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: () => void, onAdd: (data: any) => void }) => {
   const [formData, setFormData] = useState({
     nombre: '',
-    capacidad: 20,
-    area: 100,
+    capacidad: '' as any,
+    area: '' as any,
     comunidad: '',
     cp: ''
   });
@@ -5535,7 +6014,11 @@ const PotreroFormModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose
         </div>
         <form onSubmit={(e) => {
           e.preventDefault();
-          onAdd(formData);
+          onAdd({
+            ...formData,
+            capacidad: parseInt(formData.capacidad as any) || 0,
+            area: parseFloat(formData.area as any) || 0
+          });
           onClose();
         }} className="space-y-6">
           <div className="space-y-2">
@@ -5545,11 +6028,11 @@ const PotreroFormModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Capacidad (Animales)</label>
-              <input type="number" required value={formData.capacidad} onChange={(e) => setFormData({ ...formData, capacidad: parseInt(e.target.value) || 0 })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
+              <input type="number" required value={formData.capacidad} onChange={(e) => setFormData({ ...formData, capacidad: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Área (Hectáreas)</label>
-              <input type="number" required value={formData.area} onChange={(e) => setFormData({ ...formData, area: parseFloat(e.target.value) || 0 })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
+              <input type="number" required value={formData.area} onChange={(e) => setFormData({ ...formData, area: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
             </div>
           </div>
           <div className="space-y-2">
@@ -5569,6 +6052,7 @@ const FeedingModal = ({ isOpen, onClose, potreros, onAdd }: { isOpen: boolean, o
     tipo_alimento: '',
     cantidad: '',
     unidad: 'kg',
+    cost: '',
     notas: '',
     date: new Date().toISOString().split('T')[0]
   });
@@ -5585,7 +6069,14 @@ const FeedingModal = ({ isOpen, onClose, potreros, onAdd }: { isOpen: boolean, o
         </div>
         <form onSubmit={(e) => {
           e.preventDefault();
-          onAdd({ ...formData, cantidad: parseFloat(formData.cantidad), date: new Date(formData.date) });
+          const potrero = potreros.find(p => p.id === formData.potreroId);
+          onAdd({ 
+            ...formData, 
+            cantidad: parseFloat(formData.cantidad), 
+            cost: parseFloat(formData.cost) || 0,
+            potreroNombre: potrero?.nombre || '',
+            date: new Date(formData.date) 
+          });
           onClose();
         }} className="space-y-6">
           <div className="space-y-2">
@@ -5613,12 +6104,18 @@ const FeedingModal = ({ isOpen, onClose, potreros, onAdd }: { isOpen: boolean, o
               </select>
             </div>
           </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Fecha</label>
-            <DatePicker 
-              value={formData.date}
-              onChange={(val) => setFormData({ ...formData, date: val })}
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Costo Total ($)</label>
+              <input type="number" placeholder="Opcional" value={formData.cost} onChange={(e) => setFormData({ ...formData, cost: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Fecha</label>
+              <DatePicker 
+                value={formData.date}
+                onChange={(val) => setFormData({ ...formData, date: val })}
+              />
+            </div>
           </div>
           <button type="submit" className="w-full py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-primary/20">Registrar</button>
         </form>
@@ -5631,6 +6128,7 @@ const ReproductionModal = ({ isOpen, onClose, animals, onAdd }: { isOpen: boolea
   const [formData, setFormData] = useState({
     animalId: '',
     type: 'Inseminación',
+    cost: '',
     notes: '',
     date: new Date().toISOString().split('T')[0]
   });
@@ -5648,7 +6146,12 @@ const ReproductionModal = ({ isOpen, onClose, animals, onAdd }: { isOpen: boolea
         <form onSubmit={(e) => {
           e.preventDefault();
           const animal = animals.find(a => a.id === formData.animalId);
-          onAdd({ ...formData, animalName: animal?.nombre || '', date: new Date(formData.date) });
+          onAdd({ 
+            ...formData, 
+            animalName: animal?.nombre || '', 
+            cost: parseFloat(formData.cost) || 0,
+            date: new Date(formData.date) 
+          });
           onClose();
         }} className="space-y-6">
           <div className="space-y-2">
@@ -5658,14 +6161,20 @@ const ReproductionModal = ({ isOpen, onClose, animals, onAdd }: { isOpen: boolea
               {animals.filter(a => a.sexo === 'H').map(a => <option key={a.id} value={a.id}>{a.nombre} (#{a.id_arete})</option>)}
             </select>
           </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Tipo de Evento</label>
-            <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium">
-              <option value="Inseminación">Inseminación</option>
-              <option value="Palpación">Palpación</option>
-              <option value="Parto">Parto</option>
-              <option value="Celo">Celo</option>
-            </select>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Tipo de Evento</label>
+              <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium">
+                <option value="Inseminación">Inseminación</option>
+                <option value="Palpación">Palpación</option>
+                <option value="Parto">Parto</option>
+                <option value="Celo">Celo</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Costo ($)</label>
+              <input type="number" placeholder="Opcional" value={formData.cost} onChange={(e) => setFormData({ ...formData, cost: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
+            </div>
           </div>
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Fecha</label>
@@ -5709,7 +6218,7 @@ const ProductionModal = ({ isOpen, onClose, animals, onAdd }: { isOpen: boolean,
           const animal = animals.find(a => a.id === formData.animalId);
           onAdd({ 
             ...formData, 
-            quantity: parseFloat(formData.quantity), 
+            quantity: parseFloat(formData.quantity) || 0, 
             date: new Date(formData.date),
             animalId: formData.animalId || 'general',
             animalName: animal?.nombre || 'General'
@@ -5785,7 +6294,8 @@ const HealthEventModal = ({ isOpen, onClose, animals, potreros, mode, onAdd }: {
     animalId: '',
     potreroId: '',
     type: 'Vacunación',
-    tipo: '',
+    description: '',
+    cost: '',
     notes: '',
     date: new Date().toISOString().split('T')[0]
   });
@@ -5809,6 +6319,7 @@ const HealthEventModal = ({ isOpen, onClose, animals, potreros, mode, onAdd }: {
             ...formData,
             animalName: animal?.nombre || '',
             potreroName: potrero?.nombre || '',
+            cost: parseFloat(formData.cost) || 0,
             mode,
             date: new Date(formData.date)
           });
@@ -5861,24 +6372,30 @@ const HealthEventModal = ({ isOpen, onClose, animals, potreros, mode, onAdd }: {
               </select>
             </div>
             <div className="space-y-2">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Costo ($)</label>
+              <input type="number" placeholder="Opcional" value={formData.cost} onChange={(e) => setFormData({ ...formData, cost: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Descripción</label>
+              <input 
+                type="text"
+                required
+                placeholder="Ej: Brucelosis..."
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
+              />
+            </div>
+            <div className="space-y-2">
               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Fecha</label>
               <DatePicker 
                 value={formData.date}
                 onChange={(val) => setFormData({ ...formData, date: val })}
               />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Descripción (Enfermedad/Vacuna)</label>
-            <input 
-              type="text"
-              required
-              placeholder="Ej: Brucelosis, Fiebre Aftosa..."
-              value={formData.tipo}
-              onChange={(e) => setFormData({ ...formData, tipo: e.target.value })}
-              className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
-            />
           </div>
 
           <div className="space-y-2">
@@ -5900,13 +6417,14 @@ const HealthEventModal = ({ isOpen, onClose, animals, potreros, mode, onAdd }: {
   );
 };
 
-const FinanceModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: () => void, onAdd: (data: any) => void }) => {
+const FinanceModal = ({ isOpen, onClose, onAdd, animals = [] }: { isOpen: boolean, onClose: () => void, onAdd: (data: any) => void, animals?: Animal[] }) => {
   const [formData, setFormData] = useState({
     type: 'Ingreso',
     category: 'Venta',
     amount: '',
     description: '',
-    date: new Date().toISOString().split('T')[0]
+    date: new Date().toISOString().split('T')[0],
+    animalId: ''
   });
 
   if (!isOpen) return null;
@@ -5924,7 +6442,7 @@ const FinanceModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: ()
           e.preventDefault();
           onAdd({
             ...formData,
-            amount: parseFloat(formData.amount),
+            amount: parseFloat(formData.amount) || 0,
             date: new Date(formData.date)
           });
           onClose();
@@ -5940,6 +6458,7 @@ const FinanceModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: ()
                 <option value="Ingreso">Ingreso</option>
                 <option value="Egreso">Egreso</option>
                 <option value="Venta">Venta</option>
+                <option value="Compra">Compra</option>
                 <option value="Gasto">Gasto</option>
               </select>
             </div>
@@ -5976,6 +6495,20 @@ const FinanceModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: ()
             />
           </div>
           <div className="space-y-2">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Animal (Opcional)</label>
+            <select 
+              value={formData.animalId}
+              onChange={(e) => setFormData({ ...formData, animalId: e.target.value })}
+              className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
+            >
+              <option value="">Seleccionar animal...</option>
+              {animals.map(a => (
+                <option key={a.id} value={a.id}>{a.nombre} ({a.id_arete})</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Descripción</label>
             <textarea 
               value={formData.description}
@@ -5987,6 +6520,84 @@ const FinanceModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: ()
 
           <button type="submit" className="w-full py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all">
             Registrar Transacción
+          </button>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
+const MarketplaceOfferModal = ({ 
+  isOpen, 
+  onClose, 
+  animal, 
+  onPublish 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  animal: Animal | null, 
+  onPublish: (animal: Animal, price: number, description: string) => void 
+}) => {
+  const [price, setPrice] = useState('');
+  const [description, setDescription] = useState('');
+
+  if (!isOpen || !animal) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl overflow-hidden">
+        <div className="flex justify-between items-center mb-8">
+          <h3 className="text-2xl font-black text-primary tracking-tight">Publicar en Mercado</h3>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X size={24} /></button>
+        </div>
+
+        <div className="bg-gray-50 p-4 rounded-2xl mb-6 flex items-center gap-4">
+          {animal.photoUrl ? (
+            <img src={animal.photoUrl} className="w-12 h-12 rounded-xl object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
+              <Camera size={20} className="text-gray-300" />
+            </div>
+          )}
+          <div>
+            <p className="font-black text-primary">{animal.nombre}</p>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">#{animal.id_arete}</p>
+          </div>
+        </div>
+
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          if (price && description) {
+            onPublish(animal, parseFloat(price), description);
+            onClose();
+          }
+        }} className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Precio de Venta ($)</label>
+            <input 
+              type="number"
+              required
+              placeholder="0.00"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Descripción de la Oferta</label>
+            <textarea 
+              required
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium h-32 resize-none"
+              placeholder="Ej: Excelente semental, buena genética, dócil..."
+            />
+          </div>
+
+          <button type="submit" className="w-full py-4 bg-secondary text-white rounded-2xl font-bold shadow-lg shadow-secondary/20 hover:bg-secondary/90 transition-all">
+            Publicar Oferta
           </button>
         </form>
       </motion.div>
@@ -6022,7 +6633,13 @@ const AnimalTransferModal = ({
         </div>
 
         <div className="bg-gray-50 p-4 rounded-2xl mb-6 flex items-center gap-4">
-          <img src={animal.photoUrl || `https://picsum.photos/seed/${animal.id}/100/100`} className="w-12 h-12 rounded-xl object-cover" referrerPolicy="no-referrer" />
+          {animal.photoUrl ? (
+            <img src={animal.photoUrl} className="w-12 h-12 rounded-xl object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
+              <Camera size={20} className="text-gray-300" />
+            </div>
+          )}
           <div>
             <p className="font-black text-primary">{animal.nombre}</p>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">#{animal.id_arete}</p>
@@ -6095,7 +6712,9 @@ const CommunityView = ({
   onCompleteTransfer,
   currentUserId,
   marketplaceOffers,
-  onBuyOffer
+  onBuyOffer,
+  reviews,
+  onOpenAnimals
 }: { 
   profiles: PublicProfile[], 
   onStartChat: (id: string) => void,
@@ -6110,7 +6729,8 @@ const CommunityView = ({
   currentUserId: string,
   marketplaceOffers: MarketplaceOffer[],
   onBuyOffer: (offer: MarketplaceOffer) => void,
-  reviews: Review[]
+  reviews: Review[],
+  onOpenAnimals: () => void
 }) => {
   const [view, setView] = useState<'profiles' | 'chats' | 'transfers' | 'marketplace'>('profiles');
   const [transferTab, setTransferTab] = useState<'active' | 'history'>('active');
@@ -6179,6 +6799,18 @@ const CommunityView = ({
               )}
             >
               Historial
+            </button>
+          </div>
+        )}
+
+        {view === 'marketplace' && (
+          <div className="flex justify-end mb-4">
+            <button 
+              onClick={onOpenAnimals}
+              className="flex items-center gap-2 px-6 py-3 bg-secondary text-white rounded-2xl font-bold shadow-lg shadow-secondary/20 hover:bg-secondary/90 transition-all"
+            >
+              <Plus size={20} />
+              <span>Publicar Animal</span>
             </button>
           </div>
         )}
@@ -6423,12 +7055,12 @@ const InventoryModal = ({ isOpen, onClose, inventory, onAdd, onUpdate, onDelete 
   isOpen: boolean,
   onClose: () => void,
   inventory: InventoryItem[],
-  onAdd: (item: Partial<InventoryItem>) => void,
+  onAdd: (item: Partial<InventoryItem> & { cost?: number }) => void,
   onUpdate: (id: string, updates: Partial<InventoryItem>) => void,
   onDelete: (id: string) => void
 }) => {
   const [isAdding, setIsAdding] = useState(false);
-  const [newItem, setNewItem] = useState({ nombre: '', cantidad: 0, unidad: 'kg', minimo: 0 });
+  const [newItem, setNewItem] = useState({ nombre: '', cantidad: '' as any, unidad: 'kg', minimo: '' as any, cost: '' });
 
   if (!isOpen) return null;
 
@@ -6459,7 +7091,7 @@ const InventoryModal = ({ isOpen, onClose, inventory, onAdd, onUpdate, onDelete 
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-2">Cantidad</label>
-                  <input type="number" value={newItem.cantidad} onChange={e => setNewItem({...newItem, cantidad: Number(e.target.value)})} className="w-full bg-white border border-gray-100 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                  <input type="number" value={newItem.cantidad} onChange={e => setNewItem({...newItem, cantidad: e.target.value})} className="w-full bg-white border border-gray-100 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-primary/20" />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-2">Unidad</label>
@@ -6470,9 +7102,23 @@ const InventoryModal = ({ isOpen, onClose, inventory, onAdd, onUpdate, onDelete 
                     <option value="dosis">Dosis</option>
                   </select>
                 </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-2">Costo de Adquisición ($)</label>
+                  <input type="number" placeholder="Opcional" value={newItem.cost} onChange={e => setNewItem({...newItem, cost: e.target.value})} className="w-full bg-white border border-gray-100 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                </div>
               </div>
               <div className="flex gap-3">
-                <button onClick={() => { onAdd(newItem); setIsAdding(false); }} className="flex-1 py-3 bg-primary text-white rounded-xl font-bold">Guardar</button>
+                <button onClick={() => { 
+                  onAdd({
+                    nombre: newItem.nombre,
+                    cantidad: parseFloat(newItem.cantidad) || 0,
+                    unidad: newItem.unidad,
+                    minimo: parseFloat(newItem.minimo as any) || 0,
+                    cost: parseFloat(newItem.cost) || 0
+                  }); 
+                  setIsAdding(false); 
+                  setNewItem({ nombre: '', cantidad: '' as any, unidad: 'kg', minimo: '' as any, cost: '' });
+                }} className="flex-1 py-3 bg-primary text-white rounded-xl font-bold">Guardar</button>
                 <button onClick={() => setIsAdding(false)} className="flex-1 py-3 bg-gray-200 text-gray-600 rounded-xl font-bold">Cancelar</button>
               </div>
             </div>
@@ -6645,6 +7291,113 @@ const CalendarModal = ({ isOpen, onClose, tasks, onAddTask, onToggleTask, onDele
   );
 };
 
+const TaskFormModal = ({ isOpen, onClose, onAdd, initialData }: {
+  isOpen: boolean,
+  onClose: () => void,
+  onAdd: (data: Partial<Task>) => Promise<any>,
+  initialData?: Partial<Task>
+}) => {
+  const [formData, setFormData] = useState({
+    title: '',
+    type: 'otro' as const,
+    date: format(new Date(), 'yyyy-MM-dd'),
+    description: ''
+  });
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        title: initialData?.title || '',
+        type: (initialData?.type as any) || 'otro',
+        date: initialData?.date || format(new Date(), 'yyyy-MM-dd'),
+        description: initialData?.description || ''
+      });
+      setIsSaving(false);
+    }
+  }, [isOpen, initialData]);
+
+  if (!isOpen) return null;
+
+  const handleSave = async () => {
+    if (!formData.title) return;
+    setIsSaving(true);
+    try {
+      await onAdd({
+        ...formData,
+        date: new Date(formData.date + 'T12:00:00') // Use noon to avoid timezone issues
+      });
+      onClose();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white max-w-md w-full p-8 rounded-[2.5rem] shadow-2xl space-y-6"
+      >
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-black text-primary tracking-tight">Recordatorio</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-all">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-2">Título</label>
+            <input 
+              type="text" 
+              value={formData.title}
+              onChange={e => setFormData({ ...formData, title: e.target.value })}
+              placeholder="Ej: Vacunación Clostridiales"
+              className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-2">Tipo</label>
+              <select 
+                value={formData.type}
+                onChange={e => setFormData({ ...formData, type: e.target.value as any })}
+                className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:outline-none focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="vacuna">Vacunación</option>
+                <option value="desparasitacion">Desparasitación</option>
+                <option value="parto">Fecha de Parto</option>
+                <option value="otro">Otro</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-2">Fecha</label>
+              <DatePicker 
+                value={formData.date}
+                onChange={val => setFormData({ ...formData, date: val })}
+              />
+            </div>
+          </div>
+        </div>
+
+        <button 
+          onClick={handleSave}
+          disabled={isSaving || !formData.title}
+          className="w-full py-5 bg-primary text-white rounded-[1.5rem] font-bold shadow-xl shadow-primary/20 hover:bg-primary/90 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+        >
+          {isSaving ? <Loader2 className="animate-spin" /> : <Calendar size={20} />}
+          Guardar Recordatorio
+        </button>
+      </motion.div>
+    </div>
+  );
+};
+
 const ReportsModal = ({ isOpen, onClose, animals, financeTransactions, healthEvents, productionRecords, potreros }: {
   isOpen: boolean,
   onClose: () => void,
@@ -6809,14 +7562,59 @@ const ReportsModal = ({ isOpen, onClose, animals, financeTransactions, healthEve
 
         <div className="mt-8 p-6 bg-gray-50 rounded-3xl border border-gray-100">
           <h3 className="font-black text-primary uppercase tracking-widest text-[10px] mb-4">Resumen de Datos</h3>
-          <div className="grid grid-cols-2 gap-4 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
             <div className="bg-white p-4 rounded-2xl shadow-sm">
               <p className="text-2xl font-black text-primary">{animals.length}</p>
               <p className="text-[8px] text-gray-400 font-bold uppercase tracking-widest">Animales</p>
             </div>
             <div className="bg-white p-4 rounded-2xl shadow-sm">
-              <p className="text-2xl font-black text-secondary">${financeTransactions.reduce((acc, t) => acc + (t.type === 'Venta' ? t.amount : 0), 0).toLocaleString()}</p>
-              <p className="text-[8px] text-gray-400 font-bold uppercase tracking-widest">Ventas Totales</p>
+              <p className="text-2xl font-black text-green-600">
+                ${financeTransactions
+                  .filter(t => t.type === 'Venta' || t.type === 'Ingreso')
+                  .reduce((acc, t) => {
+                    const val = Number(t.amount || 0);
+                    return acc + (isNaN(val) ? 0 : val);
+                  }, 0)
+                  .toLocaleString()}
+              </p>
+              <p className="text-[8px] text-gray-400 font-bold uppercase tracking-widest">Ingresos</p>
+            </div>
+            <div className="bg-white p-4 rounded-2xl shadow-sm">
+              <p className="text-2xl font-black text-red-600">
+                ${financeTransactions
+                  .filter(t => t.type === 'Compra' || t.type === 'Egreso' || t.type === 'Gasto')
+                  .reduce((acc, t) => {
+                    const val = Number(t.amount || 0);
+                    return acc + (isNaN(val) ? 0 : val);
+                  }, 0)
+                  .toLocaleString()}
+              </p>
+              <p className="text-[8px] text-gray-400 font-bold uppercase tracking-widest">Egresos</p>
+            </div>
+            <div className="bg-white p-4 rounded-2xl shadow-sm">
+              {(() => {
+                const income = financeTransactions
+                  .filter(t => t.type === 'Venta' || t.type === 'Ingreso')
+                  .reduce((acc, t) => {
+                    const val = Number(t.amount || 0);
+                    return acc + (isNaN(val) ? 0 : val);
+                  }, 0);
+                const expense = financeTransactions
+                  .filter(t => t.type === 'Compra' || t.type === 'Egreso' || t.type === 'Gasto')
+                  .reduce((acc, t) => {
+                    const val = Number(t.amount || 0);
+                    return acc + (isNaN(val) ? 0 : val);
+                  }, 0);
+                const balance = income - expense;
+                return (
+                  <>
+                    <p className={cn("text-2xl font-black", balance >= 0 ? "text-primary" : "text-red-600")}>
+                      ${balance.toLocaleString()}
+                    </p>
+                    <p className="text-[8px] text-gray-400 font-bold uppercase tracking-widest">Balance</p>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -6825,47 +7623,230 @@ const ReportsModal = ({ isOpen, onClose, animals, financeTransactions, healthEve
   );
 };
 
-const QRCodeModal = ({ isOpen, onClose, animal }: {
+const QRCodeModal = ({ 
+  isOpen, 
+  onClose, 
+  animal,
+  healthEvents = [],
+  reproductionEvents = [],
+  productionRecords = [],
+  financeTransactions = [],
+  scannedHistory = null,
+  isLoading = false
+}: {
   isOpen: boolean,
   onClose: () => void,
-  animal: Animal | null
+  animal: Animal | null,
+  healthEvents?: HealthEvent[],
+  reproductionEvents?: ReproductionEvent[],
+  productionRecords?: ProductionRecord[],
+  financeTransactions?: FinanceTransaction[],
+  scannedHistory?: {
+    health: HealthEvent[],
+    reproduction: ReproductionEvent[],
+    production: ProductionRecord[],
+    finance: FinanceTransaction[]
+  } | null,
+  isLoading?: boolean
 }) => {
+  const [activeTab, setActiveTab] = useState<'qr' | 'history'>('qr');
+  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
+
   if (!isOpen || !animal) return null;
 
-  const qrValue = JSON.stringify({
-    id: animal.id,
-    arete: animal.id_arete,
-    nombre: animal.nombre,
-    app: 'Tlanextli'
-  });
+  const qrValue = `${window.location.origin}${window.location.pathname}?animalId=${animal.id}`;
+
+  const animalHealth = scannedHistory ? scannedHistory.health : healthEvents.filter(e => e.animalId === animal.id || (e as any).id_animal === animal.id);
+  const animalReproduction = scannedHistory ? scannedHistory.reproduction : reproductionEvents.filter(e => e.animalId === animal.id || (e as any).id_animal === animal.id);
+  const animalProduction = scannedHistory ? scannedHistory.production : productionRecords.filter(e => e.animalId === animal.id || (e as any).id_animal === animal.id);
+  const animalFinance = scannedHistory ? scannedHistory.finance : financeTransactions.filter(t => t.animalId === animal.id || (t as any).id_animal === animal.id);
+
+  const handleDownloadPDF = () => {
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: [80, 80]
+      });
+
+      const canvas = qrCanvasRef.current;
+      if (!canvas) {
+        alert("Error al generar el código QR para el PDF");
+        return;
+      }
+
+      const qrDataUrl = canvas.toDataURL('image/png');
+      
+      // Header
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.setTextColor(27, 67, 50); // Primary color
+      doc.text("TLANEXTLI", 40, 10, { align: 'center' });
+      
+      // Animal Info
+      doc.setFontSize(12);
+      doc.text(animal.nombre, 40, 18, { align: 'center' });
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Arete: #${animal.id_arete}`, 40, 24, { align: 'center' });
+      
+      // QR Code
+      doc.addImage(qrDataUrl, 'PNG', 15, 28, 50, 50);
+      
+      doc.save(`etiqueta_${animal.id_arete}.pdf`);
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      alert("Hubo un error al generar el PDF. Por favor intenta de nuevo.");
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="relative w-full max-w-sm bg-white rounded-[2.5rem] p-8 overflow-hidden flex flex-col items-center text-center">
-        <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-gray-100 rounded-xl transition-all">
+      <motion.div 
+        id="printable-qr"
+        initial={{ opacity: 0, scale: 0.95 }} 
+        animate={{ opacity: 1, scale: 1 }} 
+        className="relative w-full max-w-lg bg-white rounded-[2.5rem] p-6 sm:p-8 overflow-hidden flex flex-col shadow-2xl max-h-[90vh]"
+      >
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-gray-100 rounded-xl transition-all z-10">
           <X size={24} />
         </button>
-        
-        <div className="p-4 rounded-3xl bg-primary/5 text-primary mb-6 mt-4">
-          <Camera size={32} />
-        </div>
-        
-        <h2 className="text-2xl font-black text-primary tracking-tight mb-2">Código QR Animal</h2>
-        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mb-8">Escanea para ver historial</p>
 
-        <div className="p-6 bg-white rounded-[2rem] shadow-2xl shadow-primary/10 border border-gray-50 mb-8">
-          <QRCodeSVG value={qrValue} size={200} level="H" includeMargin={true} />
+        <div className="flex gap-2 mb-6 bg-gray-50 p-1.5 rounded-2xl w-fit">
+          <button 
+            onClick={() => setActiveTab('qr')}
+            className={cn(
+              "px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+              activeTab === 'qr' ? "bg-white text-primary shadow-sm" : "text-gray-400 hover:text-gray-600"
+            )}
+          >
+            Código QR
+          </button>
+          <button 
+            onClick={() => setActiveTab('history')}
+            className={cn(
+              "px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+              activeTab === 'history' ? "bg-white text-primary shadow-sm" : "text-gray-400 hover:text-gray-600"
+            )}
+          >
+            Historial
+          </button>
         </div>
 
-        <div className="w-full bg-gray-50 p-4 rounded-2xl">
-          <p className="font-black text-primary">{animal.nombre}</p>
-          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">#{animal.id_arete}</p>
-        </div>
+        <div className="overflow-y-auto custom-scrollbar flex-1">
+          {activeTab === 'qr' ? (
+            <div className="flex flex-col items-center text-center">
+              <div className="p-4 rounded-3xl bg-primary/5 text-primary mb-6 mt-4">
+                <Camera size={32} />
+              </div>
+              
+              <h2 className="text-2xl font-black text-primary tracking-tight mb-2">Código QR Animal</h2>
+              <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mb-8">Escanea para ver historial</p>
 
-        <button onClick={() => window.print()} className="mt-6 w-full py-4 bg-primary text-white rounded-2xl font-bold text-[10px] uppercase tracking-widest hover:bg-primary/90 transition-all flex items-center justify-center gap-2">
-          <Download size={18} /> Imprimir Etiqueta
-        </button>
+              <div className="p-8 bg-white rounded-[2.5rem] shadow-2xl shadow-primary/10 border border-gray-50 mb-8">
+                <QRCodeSVG value={qrValue} size={280} level="H" includeMargin={true} />
+                {/* Hidden canvas for PDF generation */}
+                <div className="hidden">
+                  <QRCodeCanvas ref={qrCanvasRef} value={qrValue} size={500} level="H" includeMargin={true} />
+                </div>
+              </div>
+
+              <div className="w-full bg-gray-50 p-4 rounded-2xl mb-6">
+                <p className="font-black text-primary">{animal.nombre}</p>
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">#{animal.id_arete}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 w-full">
+                <button 
+                  onClick={() => window.print()} 
+                  className="py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold text-[10px] uppercase tracking-widest hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
+                >
+                  Vista Previa
+                </button>
+                <button 
+                  onClick={handleDownloadPDF} 
+                  className="py-4 bg-primary text-white rounded-2xl font-bold text-[10px] uppercase tracking-widest hover:bg-primary/90 transition-all flex items-center justify-center gap-2"
+                >
+                  <Download size={18} /> Descargar PDF
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6 pb-4">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-16 h-16 rounded-2xl bg-primary/5 flex items-center justify-center">
+                  {animal.photoUrl ? (
+                    <img src={animal.photoUrl} className="w-full h-full object-cover rounded-2xl" referrerPolicy="no-referrer" />
+                  ) : (
+                    <Camera size={24} className="text-primary/20" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-primary">{animal.nombre}</h3>
+                  <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">#{animal.id_arete}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-2 pt-2">
+                  <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Eventos de Salud</h4>
+                  {isLoading && <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
+                </div>
+                {animalHealth.length > 0 ? animalHealth.map(e => (
+                  <div key={e.id} className="p-4 bg-red-50/50 rounded-2xl border border-red-100/50">
+                    <div className="flex justify-between items-start mb-1">
+                      <p className="font-bold text-sm text-red-900">{e.type}</p>
+                      <span className="text-[8px] font-black text-red-400 uppercase">{e.date?.toDate ? format(e.date.toDate(), 'dd/MM/yy') : (e.date ? format(new Date(e.date), 'dd/MM/yy') : 'Reciente')}</span>
+                    </div>
+                    <p className="text-xs text-red-700/70">{(e as any).description || (e as any).tipo || (e as any).notes}</p>
+                  </div>
+                )) : <p className="text-xs text-gray-400 italic px-2">Sin eventos de salud registrados</p>}
+
+                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100 pb-2 pt-2">Reproducción</h4>
+                {animalReproduction.length > 0 ? animalReproduction.map(e => (
+                  <div key={e.id} className="p-4 bg-pink-50/50 rounded-2xl border border-pink-100/50">
+                    <div className="flex justify-between items-start mb-1">
+                      <p className="font-bold text-sm text-pink-900">{e.type}</p>
+                      <span className="text-[8px] font-black text-pink-400 uppercase">{e.date?.toDate ? format(e.date.toDate(), 'dd/MM/yy') : (e.date ? format(new Date(e.date), 'dd/MM/yy') : 'Reciente')}</span>
+                    </div>
+                    <p className="text-xs text-pink-700/70">{e.notes}</p>
+                    {e.result && <p className="text-[10px] font-bold text-pink-600 mt-1 uppercase tracking-widest">Resultado: {e.result}</p>}
+                  </div>
+                )) : <p className="text-xs text-gray-400 italic px-2">Sin eventos reproductivos</p>}
+
+                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100 pb-2 pt-2">Producción</h4>
+                {animalProduction.length > 0 ? animalProduction.map(e => (
+                  <div key={e.id} className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100/50 flex justify-between items-center">
+                    <div>
+                      <p className="font-bold text-sm text-blue-900">{e.type}</p>
+                      <p className="text-[8px] font-black text-blue-400 uppercase">{e.date?.toDate ? format(e.date.toDate(), 'dd/MM/yy') : (e.date ? format(new Date(e.date), 'dd/MM/yy') : 'Reciente')}</p>
+                    </div>
+                    <p className="font-black text-blue-600">{e.quantity} {e.unit}</p>
+                  </div>
+                )) : <p className="text-xs text-gray-400 italic px-2">Sin registros de producción</p>}
+
+                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100 pb-2 pt-2">Finanzas</h4>
+                {animalFinance.length > 0 ? animalFinance.map(t => (
+                  <div key={t.id} className={cn(
+                    "p-4 rounded-2xl border flex justify-between items-center",
+                    (t.type === 'Venta' || t.type === 'Ingreso') ? "bg-green-50/50 border-green-100/50" : "bg-orange-50/50 border-orange-100/50"
+                  )}>
+                    <div>
+                      <p className={cn("font-bold text-sm", (t.type === 'Venta' || t.type === 'Ingreso') ? "text-green-900" : "text-orange-900")}>{t.type}</p>
+                      <p className="text-[8px] font-black text-gray-400 uppercase">{t.date?.toDate ? format(t.date.toDate(), 'dd/MM/yy') : (t.date ? format(new Date(t.date), 'dd/MM/yy') : 'Reciente')}</p>
+                    </div>
+                    <p className={cn("font-black", (t.type === 'Venta' || t.type === 'Ingreso') ? "text-green-600" : "text-orange-600")}>
+                      ${t.amount.toLocaleString()}
+                    </p>
+                  </div>
+                )) : <p className="text-xs text-gray-400 italic px-2">Sin transacciones financieras</p>}
+              </div>
+            </div>
+          )}
+        </div>
       </motion.div>
     </div>
   );
@@ -6928,7 +7909,7 @@ const ChatModal = ({ isOpen, onClose, chat, messages, onSendMessage, currentUser
               </div>
               <div className="flex items-center gap-1 mt-1">
                 <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">
-                  {m.date?.toDate ? format(m.date.toDate(), 'HH:mm') : 'Enviando...'}
+                  {safeFormatDate(m.date, 'HH:mm')}
                 </span>
                 {m.senderId === currentUserId && (
                   <div className={cn(
@@ -6969,6 +7950,128 @@ const ChatModal = ({ isOpen, onClose, chat, messages, onSendMessage, currentUser
             </button>
           </form>
         </div>
+      </motion.div>
+    </div>
+  );
+};
+
+const QRScannerModal = ({ isOpen, onClose, onScanSuccess }: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onScanSuccess: (id: string) => void 
+}) => {
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Only proceed if actually open (though parent manages mounting too)
+    if (!isOpen) return;
+
+    // Use a small timeout to ensure the DOM element 'qr-reader' is fully rendered
+    const startTimeout = setTimeout(() => {
+      const html5QrCode = new Html5Qrcode("qr-reader");
+      
+      const config = { 
+        fps: 10, 
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0
+      };
+
+      const onScanSuccessLocal = (decodedText: string) => {
+        try {
+          if (decodedText.includes('animalId=')) {
+            const url = new URL(decodedText);
+            const id = url.searchParams.get('animalId');
+            if (id) {
+              onScanSuccess(id);
+              if (html5QrCode.isScanning) {
+                html5QrCode.stop().catch(err => console.error(err));
+              }
+            }
+          } else {
+            onScanSuccess(decodedText);
+            if (html5QrCode.isScanning) {
+              html5QrCode.stop().catch(err => console.error(err));
+            }
+          }
+        } catch (e) {
+          onScanSuccess(decodedText);
+          if (html5QrCode.isScanning) {
+            html5QrCode.stop().catch(err => console.error(err));
+          }
+        }
+      };
+
+      html5QrCode.start(
+        { facingMode: "environment" }, 
+        config, 
+        onScanSuccessLocal,
+        (errorMessage) => {
+          if (!errorMessage.includes("NotFound")) {
+            // console.warn(`QR scan error: ${errorMessage}`);
+          }
+        }
+      ).catch(err => {
+        console.error("Starting scanner failed", err);
+        setError("No se pudo acceder a la cámara. Asegúrate de dar permisos.");
+      });
+
+      // Cleanup function to stop scanning when component unmounts or isOpen changes
+      return () => {
+        if (html5QrCode.isScanning) {
+          html5QrCode.stop().catch(error => console.error("Failed to stop scanner", error));
+        }
+      };
+    }, 300);
+
+    return () => clearTimeout(startTimeout);
+  }, [isOpen, onScanSuccess]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0, y: 20 }} 
+        animate={{ scale: 1, opacity: 1, y: 0 }} 
+        className="relative bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col p-8"
+      >
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-gray-100 rounded-xl transition-colors">
+          <X size={24} />
+        </button>
+
+        <div className="mb-8 text-center">
+          <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Camera size={32} />
+          </div>
+          <h3 className="text-2xl font-black text-primary tracking-tight">Escáner de QR</h3>
+          <p className="text-sm text-gray-500 font-medium mt-2">Apunta con tu cámara trasera al código del animal</p>
+        </div>
+
+        <div className="relative aspect-square bg-gray-900 rounded-3xl overflow-hidden border-4 border-gray-100 shadow-inner">
+          <div id="qr-reader" className="w-full h-full"></div>
+          {/* Overlay scanning line effect */}
+          <div className="absolute inset-0 border-2 border-primary/20 pointer-events-none">
+            <motion.div 
+              animate={{ top: ['0%', '100%', '0%'] }} 
+              transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+              className="absolute left-0 right-0 h-0.5 bg-primary shadow-[0_0_15px_rgba(34,197,94,0.5)] z-10" 
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div className="mt-4 p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-bold text-center">
+            {error}
+          </div>
+        )}
+
+        <button 
+          onClick={onClose}
+          className="mt-8 py-4 w-full bg-gray-100 text-gray-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-gray-200 transition-all"
+        >
+          Cancelar
+        </button>
       </motion.div>
     </div>
   );

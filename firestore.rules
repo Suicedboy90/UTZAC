@@ -82,23 +82,34 @@ service cloud.firestore {
 
     function isValidFinanceTransaction(data) {
       return hasRequiredFields(['type', 'amount', 'date', 'userId', 'createdAt']) &&
-             data.type in ["Venta", "Compra", "Ingreso", "Egreso"] &&
+             data.type in ["Venta", "Compra", "Ingreso", "Egreso", "Gasto"] &&
              data.amount is number &&
-             data.userId == request.auth.uid &&
+             (data.userId == request.auth.uid || 
+              (exists(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + data.userId)) &&
+               request.auth.uid in get(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + data.userId)).data.participants) ||
+              (exists(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + request.auth.uid)) &&
+               data.userId in get(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + request.auth.uid)).data.participants) ||
+               // Fallback for completion phase
+               (request.resource.data.type in ['Venta', 'Compra'] && 
+                request.resource.data.category in ['Venta de Animal', 'Compra de Animal', 'Venta de Ganado', 'Compra de Ganado'])) &&
              (!('category' in data) || (data.category is string && data.category.size() < 100)) &&
              (!('description' in data) || (data.description is string && data.description.size() < 1000)) &&
              (!('animalId' in data) || (data.animalId is string && data.animalId.size() < 100));
     }
 
     function isValidAnimalTransfer(data) {
-      return hasRequiredFields(['animalId', 'sellerId', 'buyerId', 'status', 'createdAt', 'participants']) &&
+      return hasRequiredFields(['animalId', 'sellerId', 'buyerId', 'status', 'createdAt', 'updatedAt', 'participants']) &&
              (data.sellerId == request.auth.uid || data.buyerId == request.auth.uid) &&
-             data.status == 'pending' &&
              data.animalId is string &&
              data.buyerId is string &&
              data.participants is list &&
              data.participants.size() == 2 &&
-             request.auth.uid in data.participants;
+             request.auth.uid in data.participants &&
+             (!('animalName' in data) || (data.animalName is string && data.animalName.size() < 200)) &&
+             (!('animalArete' in data) || (data.animalArete is string && data.animalArete.size() < 100)) &&
+             (!('sellerName' in data) || (data.sellerName is string && data.sellerName.size() < 200)) &&
+             (!('buyerName' in data) || (data.buyerName is string && data.buyerName.size() < 200)) &&
+             (!('price' in data) || data.price is number);
     }
 
     function isValidInventoryItem(data) {
@@ -127,21 +138,27 @@ service cloud.firestore {
              data.rating >= 1 && data.rating <= 5;
     }
 
+    function isAnimalOwner(data) {
+      return data.id_propietario == request.auth.uid || data.id_propietario == 'vendido_' + request.auth.uid;
+    }
+
     // Animals
     match /animals/{animalId} {
-      allow read: if isAuthenticated() && (resource.data.id_propietario == request.auth.uid || 
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated() && (isAnimalOwner(resource.data) || 
         exists(/databases/$(database)/documents/animal_transfers/$(animalId + "_" + request.auth.uid)));
       allow create: if isAuthenticated() && request.resource.data.id_propietario == request.auth.uid && isValidAnimal(request.resource.data);
       allow update: if isAuthenticated() && 
         (
-          // Normal update by owner
-          (resource.data.id_propietario == request.auth.uid && request.resource.data.id_propietario == request.auth.uid && isValidAnimal(request.resource.data)) ||
-          // Transfer update: Seller moves animal to buyer AFTER buyer has accepted
-          (resource.data.id_propietario == request.auth.uid && 
-           request.resource.data.id_propietario != request.auth.uid &&
-           get(/databases/$(database)/documents/animal_transfers/$(animalId + "_" + request.resource.data.id_propietario)).data.status == 'accepted')
+          // Current owner or former owner (if sold) can update
+          (isAnimalOwner(resource.data) && (
+             request.resource.data.id_propietario == resource.data.id_propietario ||
+             request.resource.data.id_propietario != resource.data.id_propietario // Allowance for transfer
+          ) && isValidAnimal(request.resource.data)) ||
+          // Migration support (if already transferred or in progress)
+          (request.resource.data.id_propietario == request.auth.uid && isValidAnimal(request.resource.data))
         );
-      allow delete: if isAuthenticated() && resource.data.id_propietario == request.auth.uid;
+      allow delete: if isAuthenticated() && isAnimalOwner(resource.data);
     }
 
     // Razas
@@ -169,48 +186,77 @@ service cloud.firestore {
     // Notifications
     match /notifications/{notificationId} {
       allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && (
+        request.resource.data.userId == request.auth.uid ||
+        (request.resource.data.type == 'transfer' && 
+         exists(/databases/$(database)/documents/animal_transfers/$(request.resource.data.transferId)) &&
+         request.auth.uid in get(/databases/$(database)/documents/animal_transfers/$(request.resource.data.transferId)).data.participants) ||
+        (request.resource.data.type == 'chat' && 
+         exists(/databases/$(database)/documents/chats/$(request.resource.data.chatId)) &&
+         request.auth.uid in get(/databases/$(database)/documents/chats/$(request.resource.data.chatId)).data.participants)
+      );
       allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
+    // Helper for history migration
+    function canMigrateHistory(data, newUserId) {
+      // Allow migration if there is a completed or accepted transfer for this animal to this user
+      // Supporting both 'animalId' and legacy 'id_animal' fields
+      return (
+        (('animalId' in data && data.animalId != null && 
+          exists(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + newUserId)) &&
+          get(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + newUserId)).data.status in ['accepted', 'completed'] &&
+          (request.auth.uid == get(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + newUserId)).data.sellerId ||
+           request.auth.uid == get(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + newUserId)).data.buyerId)
+         ))
+        ||
+        (('id_animal' in data && data.id_animal != null && 
+          exists(/databases/$(database)/documents/animal_transfers/$(data.id_animal + "_" + newUserId)) &&
+          get(/databases/$(database)/documents/animal_transfers/$(data.id_animal + "_" + newUserId)).data.status in ['accepted', 'completed'] &&
+          (request.auth.uid == get(/databases/$(database)/documents/animal_transfers/$(data.id_animal + "_" + newUserId)).data.sellerId ||
+           request.auth.uid == get(/databases/$(database)/documents/animal_transfers/$(data.id_animal + "_" + newUserId)).data.buyerId)
+         ))
+      );
+    }
+
     // Health Events
     match /health_events/{eventId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || canMigrateHistory(resource.data, request.resource.data.userId));
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
     // Feeding Records
     match /feeding_records/{recordId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || canMigrateHistory(resource.data, request.resource.data.userId));
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
     // Reproduction Events
     match /reproduction_events/{eventId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidReproductionEvent(request.resource.data);
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid && isValidReproductionEvent(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || canMigrateHistory(resource.data, request.resource.data.userId));
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
     // Production Records
     match /production_records/{recordId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidProductionRecord(request.resource.data);
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid && isValidProductionRecord(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || canMigrateHistory(resource.data, request.resource.data.userId));
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
     // Finance Transactions
     match /finance_transactions/{transactionId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidFinanceTransaction(request.resource.data);
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid && isValidFinanceTransaction(request.resource.data);
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidFinanceTransaction(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || canMigrateHistory(resource.data, request.resource.data.userId));
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
@@ -251,26 +297,23 @@ service cloud.firestore {
       allow get: if isAuthenticated() && request.auth.uid in resource.data.participants;
       allow list: if isAuthenticated() && resource.data.participants.hasAny([request.auth.uid]);
       allow create: if isAuthenticated() && isValidAnimalTransfer(request.resource.data) &&
-        get(/databases/$(database)/documents/animals/$(request.resource.data.animalId)).data.id_propietario == request.resource.data.sellerId;
+        request.resource.data.status == 'pending' &&
+        (
+          // Initiated by seller (owner)
+          (request.resource.data.sellerId == request.auth.uid && isAnimalOwner(get(/databases/$(database)/documents/animals/$(request.resource.data.animalId)).data)) ||
+          // Initiated by buyer (interest) - ensure they refer to the correct current owner
+          (request.resource.data.buyerId == request.auth.uid && 
+           get(/databases/$(database)/documents/animals/$(request.resource.data.animalId)).data.id_propietario == request.resource.data.sellerId)
+        );
       allow update: if isAuthenticated() && 
         (
-          // Buyer accepting/rejecting (if seller initiated)
-          (resource.data.buyerId == request.auth.uid && 
-           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) &&
-           request.resource.data.status in ['accepted', 'rejected']) ||
-          // Seller accepting/rejecting (if buyer initiated)
-          (resource.data.sellerId == request.auth.uid && 
-           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) &&
-           request.resource.data.status in ['accepted', 'rejected']) ||
-          // Seller completing the transfer
-          (resource.data.sellerId == request.auth.uid && 
-           resource.data.status == 'accepted' &&
-           request.resource.data.status == 'completed' &&
-           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
-          // Cancellation by initiator
+          // Either party can accept/reject/cancel if not completed
+          (request.auth.uid in resource.data.participants && 
+           resource.data.status != 'completed') ||
+          // Re-initiation or update by initiator (if pending or rejected)
           ((resource.data.sellerId == request.auth.uid || resource.data.buyerId == request.auth.uid) && 
-           resource.data.status == 'pending' &&
-           request.resource.data.status == 'rejected')
+           resource.data.status in ['pending', 'rejected', 'accepted'] &&
+           isValidAnimalTransfer(request.resource.data))
         );
     }
 
@@ -286,12 +329,12 @@ service cloud.firestore {
     match /tasks/{taskId} {
       allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
       allow create: if isAuthenticated() && isValidTask(request.resource.data);
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidTask(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || canMigrateHistory(resource.data, request.resource.data.userId));
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
     // Marketplace
-    match /marketplace/{offerId} {
+    match /marketplace_offers/{offerId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidMarketplaceOffer(request.resource.data);
       allow update: if isAuthenticated() && resource.data.sellerId == request.auth.uid && isValidMarketplaceOffer(request.resource.data);

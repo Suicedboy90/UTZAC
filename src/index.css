@@ -79,3 +79,30 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-qr, #printable-qr * {
+    visibility: visible;
+  }
+  #printable-qr {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: white;
+    z-index: 9999;
+  }
+  /* Hide UI elements in printable area */
+  #printable-qr button, 
+  #printable-qr .flex.gap-2.mb-6 {
+    display: none !important;
+  }
+}
