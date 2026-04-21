@@ -98,6 +98,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { cn } from './utils';
+import { usePWAInstall } from './hooks/usePWAInstall';
 
 // --- Constants ---
 const LOGO_URL = "https://i.imgur.com/9VzJJ0a.png"; // URL directa de la imagen de Imgur
@@ -2224,6 +2225,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 export default function App() {
+  const { isInstallable, installPWA } = usePWAInstall();
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [activeTab, setActiveTab] = useState('inicio');
   const [isCommunityOpen, setIsCommunityOpen] = useState(false);
@@ -3888,6 +3890,15 @@ export default function App() {
               <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Propietario</p>
             </div>
           </div>
+          {isInstallable && (
+            <button 
+              onClick={installPWA}
+              className="flex items-center gap-3 text-primary hover:text-accent font-bold text-sm px-4 py-2 w-full transition-colors mb-2"
+            >
+              <Download size={18} />
+              Instalar App
+            </button>
+          )}
           <button 
             onClick={handleLogout}
             className="flex items-center gap-3 text-red-500 hover:text-red-600 font-bold text-sm px-4 py-2 w-full transition-colors"
@@ -4504,6 +4515,17 @@ export default function App() {
                         </div>
                         <ChevronRight size={18} className="text-gray-300" />
                       </button>
+                      {isInstallable && (
+                        <button onClick={installPWA} className="w-full flex items-center justify-between p-5 hover:bg-accent/10 transition-colors border-b border-gray-50 group">
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-xl bg-accent/10 text-accent flex items-center justify-center group-hover:bg-accent group-hover:text-white transition-colors">
+                              <Download size={20} />
+                            </div>
+                            <span className="font-bold text-primary">Instalar App</span>
+                          </div>
+                          <ChevronRight size={18} className="text-gray-300" />
+                        </button>
+                      )}
                       <button onClick={handleLogout} className="w-full flex items-center justify-between p-5 hover:bg-red-50 transition-colors group">
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
