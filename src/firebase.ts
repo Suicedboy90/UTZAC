@@ -11,7 +11,7 @@ import firebaseConfig from '../firebase-applet-config.json';
 const app = initializeApp(firebaseConfig);
 
 // Initialize Firestore with modern cache settings and long-polling
-// This resolves deprecation warnings and optimizes for restricted networks
+// This resolves connectivity issues in restricted networks
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   localCache: persistentLocalCache({

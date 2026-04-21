@@ -19,7 +19,6 @@ import {
   X,
   HeartPulse,
   Wheat,
-  Map as MapIcon,
   ArrowLeftRight,
   ShoppingCart,
   ShoppingBag,
@@ -90,6 +89,7 @@ import {
   setDoc,
   doc, 
   getDoc,
+  getDocFromServer,
   serverTimestamp, 
   getDocs,
   writeBatch,
@@ -209,7 +209,7 @@ interface Animal {
   id_raza: string;
   id_categoria: string;
   id_propietario: string;
-  id_potrero: string;
+  id_potrero?: string;
   peso: number;
   precio?: number;
   tipo_produccion: string;
@@ -217,6 +217,14 @@ interface Animal {
   padreId?: string;
   madreId?: string;
   createdAt?: any;
+}
+
+interface Potrero {
+  id: string;
+  nombre: string;
+  descripcion: string;
+  capacidad: number;
+  userId: string;
 }
 
 interface Notification {
@@ -245,18 +253,14 @@ interface AnimalTransfer {
   updatedAt: any;
 }
 
-interface Potrero {
-  id: string;
-  nombre: string;
-  id_finca: string;
-  comunidad: string;
-}
-
 interface HealthEvent {
   id: string;
-  animalId: string;
-  animalName: string;
-  animalArete: string;
+  animalId?: string;
+  animalName?: string;
+  animalArete?: string;
+  potreroId?: string;
+  potreroName?: string;
+  mode: 'individual' | 'grupal';
   type: string;
   description: string;
   date: any;
@@ -266,11 +270,11 @@ interface HealthEvent {
 
 interface FeedingRecord {
   id: string;
-  potreroId: string;
-  potreroNombre: string;
   foodType: string;
   quantity: number;
   unit: string;
+  potreroId: string;
+  potreroName: string;
   date: any;
   userId: string;
 }
@@ -645,13 +649,16 @@ const calculateAge = (birthDate: any) => {
 
 const AnimalCard: React.FC<{ 
   animal: Animal, 
-  potreros: Potrero[],
+  potreros?: Potrero[],
   onClick?: () => void,
   onTransfer?: (e: React.MouseEvent) => void,
   onShowQR?: (e: React.MouseEvent) => void,
   onSell?: (e: React.MouseEvent) => void,
   onDelete?: (e: React.MouseEvent) => void
-}> = ({ animal, potreros, onClick, onTransfer, onShowQR, onSell, onDelete }) => (
+}> = ({ animal, potreros = [], onClick, onTransfer, onShowQR, onSell, onDelete }) => {
+  const potrero = potreros.find(p => p.id === animal.id_potrero);
+  
+  return (
     <motion.div 
       whileHover={{ y: -8 }}
       whileTap={{ scale: 0.98 }}
@@ -722,7 +729,14 @@ const AnimalCard: React.FC<{
       <div>
         <div className="flex justify-between items-start mb-1">
           <h4 className="text-xl font-black text-primary tracking-tight">{animal.nombre}</h4>
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">#{animal.id_arete}</span>
+          <div className="flex flex-col items-end gap-1">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">#{animal.id_arete}</span>
+            {potrero && (
+              <span className="text-[10px] font-bold text-primary bg-primary/5 px-2 py-0.5 rounded-full uppercase tracking-widest">
+                {potrero.nombre}
+              </span>
+            )}
+          </div>
         </div>
         <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">
           {CATTLE_BREEDS.find(b => b.id === animal.id_raza)?.name || 'Raza Desconocida'}
@@ -739,9 +753,9 @@ const AnimalCard: React.FC<{
           <p className="text-sm font-black text-primary">{animal.peso}kg</p>
         </div>
         <div className="text-center">
-          <p className="text-[8px] text-gray-400 uppercase tracking-widest font-bold mb-1">Ubicación</p>
+          <p className="text-[8px] text-gray-400 uppercase tracking-widest font-bold mb-1">Estado</p>
           <p className="text-sm font-black text-secondary truncate">
-            {potreros.find(p => p.id === animal.id_potrero)?.nombre || 'Corral'}
+            {animal.id_propietario?.startsWith('vendido_') ? 'Vendido' : 'Activo'}
           </p>
         </div>
       </div>
@@ -772,8 +786,9 @@ const AnimalCard: React.FC<{
         </button>
       </div>
     </div>
-  </motion.div>
-);
+    </motion.div>
+  );
+};
 
 const addWatermark = (dataUrl: string, text: string): Promise<string> => {
   return new Promise((resolve) => {
@@ -893,12 +908,12 @@ const NotificationItem: React.FC<{ notification: Notification, onClick: (n: Noti
   );
 };
 
-const FeedingRecordModal = ({ isOpen, onClose, onAdd, potreros }: { isOpen: boolean, onClose: () => void, onAdd: (data: any) => void, potreros: Potrero[] }) => {
+const FeedingRecordModal = ({ isOpen, onClose, onAdd, potreros = [] }: { isOpen: boolean, onClose: () => void, onAdd: (data: any) => void, potreros?: Potrero[] }) => {
   const [formData, setFormData] = useState({
-    potreroId: '',
     foodType: '',
     quantity: '' as any,
     unit: 'kg',
+    potreroId: '',
     date: new Date().toISOString().split('T')[0],
     time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
   });
@@ -906,9 +921,6 @@ const FeedingRecordModal = ({ isOpen, onClose, onAdd, potreros }: { isOpen: bool
   if (!isOpen) return null;
 
   const handleSubmit = () => {
-    const potrero = potreros.find(p => p.id === formData.potreroId);
-    if (!potrero) return;
-    
     let finalDate: any = serverTimestamp();
     if (formData.date) {
       const [year, month, day] = formData.date.split('-').map(Number);
@@ -916,10 +928,11 @@ const FeedingRecordModal = ({ isOpen, onClose, onAdd, potreros }: { isOpen: bool
       finalDate = new Date(year, month - 1, day, hours, minutes);
     }
 
+    const potrero = potreros.find(p => p.id === formData.potreroId);
     onAdd({
       ...formData,
+      potreroName: potrero?.nombre || '',
       quantity: parseFloat(formData.quantity as any) || 0,
-      potreroNombre: potrero.nombre,
       date: finalDate
     });
     onClose();
@@ -946,7 +959,7 @@ const FeedingRecordModal = ({ isOpen, onClose, onAdd, potreros }: { isOpen: bool
             </div>
             <div>
               <h2 className="text-xl font-bold text-[#1a1a1a]">Registro de Alimentación</h2>
-              <p className="text-xs text-gray-500">Alimento por potrero</p>
+              <p className="text-xs text-gray-500">Alimento para el hato</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-400"><X size={20} /></button>
@@ -954,13 +967,13 @@ const FeedingRecordModal = ({ isOpen, onClose, onAdd, potreros }: { isOpen: bool
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-gray-700 ml-1">Potrero / Zona</label>
+            <label className="text-xs font-semibold text-gray-700 ml-1">Corral (Potrero)</label>
             <select 
               value={formData.potreroId}
               onChange={(e) => setFormData({ ...formData, potreroId: e.target.value })}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm appearance-none cursor-pointer"
             >
-              <option value="">Seleccionar potrero...</option>
+              <option value="">Seleccionar Corral</option>
               {potreros.map(p => (
                 <option key={p.id} value={p.id}>{p.nombre}</option>
               ))}
@@ -1088,14 +1101,12 @@ const HealthTab = ({ healthEvents, animals, onAddEvent }: { healthEvents: Health
         onClose={() => setIsModalOpen(false)} 
         onAdd={onAddEvent} 
         animals={animals} 
-        potreros={[]}
-        mode="individual"
       />
     </div>
   );
 };
 
-const FeedingTab = ({ feedingRecords, potreros, onAddRecord }: { feedingRecords: FeedingRecord[], potreros: Potrero[], onAddRecord: (data: any) => void }) => {
+const FeedingTab = ({ feedingRecords, onAddRecord }: { feedingRecords: FeedingRecord[], onAddRecord: (data: any) => void }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
@@ -1126,7 +1137,6 @@ const FeedingTab = ({ feedingRecords, potreros, onAddRecord }: { feedingRecords:
               </span>
             </div>
             <h4 className="text-lg font-bold text-[#1a1a1a] mb-1">{record.foodType}</h4>
-            <p className="text-xs text-gray-500 mb-6 uppercase tracking-widest">{record.potreroNombre}</p>
             <div className="pt-4 border-t border-gray-100 flex justify-between items-center">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Cantidad</span>
               <span className="font-bold text-[#2e7d32]">{record.quantity} {record.unit}</span>
@@ -1147,179 +1157,7 @@ const FeedingTab = ({ feedingRecords, potreros, onAddRecord }: { feedingRecords:
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
         onAdd={onAddRecord} 
-        potreros={potreros} 
       />
-    </div>
-  );
-};
-
-const PotreroModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: () => void, onAdd: (data: any) => void }) => {
-  const [formData, setFormData] = useState({
-    nombre: ''
-  });
-  const [isSaving, setIsSaving] = useState(false);
-
-  if (!isOpen) return null;
-
-  const handleSave = async () => {
-    if (!formData.nombre) return;
-    setIsSaving(true);
-    try {
-      await onAdd(formData);
-      setFormData({ nombre: '' });
-      onClose();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-      />
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 flex flex-col gap-6 shadow-2xl"
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-[#1a1a1a]">Nuevo Potrero</h2>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-400">
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-gray-700 ml-1">Nombre del Potrero</label>
-            <input 
-              type="text" 
-              value={formData.nombre}
-              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-              placeholder="Ej. Potrero Norte" 
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
-            />
-          </div>
-        </div>
-
-        <div className="flex gap-3 pt-2">
-          <button 
-            onClick={onClose}
-            disabled={isSaving}
-            className="flex-1 px-6 py-3.5 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-sm disabled:opacity-50"
-          >
-            Cancelar
-          </button>
-          <button 
-            onClick={handleSave}
-            disabled={isSaving}
-            className="flex-[2] px-6 py-3.5 rounded-xl font-bold text-white bg-[#2e7d32] hover:bg-[#1b5e20] transition-colors shadow-lg shadow-[#2e7d32]/20 text-sm disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {isSaving ? 'Guardando...' : 'Registrar'}
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-const PotreroDetailsModal = ({ 
-  isOpen, 
-  onClose, 
-  potrero, 
-  animals, 
-  potreros, 
-  onUpdateAnimal 
-}: { 
-  isOpen: boolean, 
-  onClose: () => void, 
-  potrero: Potrero | null, 
-  animals: Animal[], 
-  potreros: Potrero[],
-  onUpdateAnimal: (id: string, data: any) => void 
-}) => {
-  if (!isOpen || !potrero) return null;
-
-  const potreroAnimals = animals.filter(a => a.id_potrero === potrero.id);
-
-  return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-      />
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="relative w-full max-w-2xl bg-white rounded-3xl p-6 sm:p-8 flex flex-col gap-6 shadow-2xl overflow-hidden max-h-[85vh]"
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="p-2.5 rounded-xl bg-[#2e7d32]/10 text-[#2e7d32]">
-              <MapIcon size={24} />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-[#1a1a1a]">{potrero.nombre}</h2>
-              <p className="text-xs text-gray-500">Animales en este potrero</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-400"><X size={20} /></button>
-        </div>
-
-        <div className="overflow-y-auto pr-2 space-y-3 custom-scrollbar">
-          {potreroAnimals.length === 0 ? (
-            <div className="py-12 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-              <p className="font-bold text-sm text-gray-400 uppercase tracking-widest">No hay animales en este potrero</p>
-            </div>
-          ) : (
-            potreroAnimals.map(animal => (
-              <div key={animal.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between gap-4 hover:border-[#2e7d32]/20 transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center font-bold text-xs text-[#1a1a1a]">
-                    {animal.id_arete.slice(-2)}
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-[#1a1a1a]">{animal.nombre}</h4>
-                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{animal.id_arete}</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-3">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Mover a:</label>
-                    <select 
-                      className="bg-gray-50 border border-gray-200 rounded-lg py-1.5 px-3 text-[10px] font-bold uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all appearance-none cursor-pointer text-[#1a1a1a]"
-                      value={animal.id_potrero}
-                      onChange={(e) => {
-                        if (e.target.value !== animal.id_potrero) {
-                          onUpdateAnimal(animal.id, { id_potrero: e.target.value });
-                        }
-                      }}
-                    >
-                      {potreros.map(p => (
-                        <option key={p.id} value={p.id}>{p.nombre}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="p-2 text-gray-300 mt-3">
-                    <ArrowLeftRight size={14} />
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </motion.div>
     </div>
   );
 };
@@ -1691,108 +1529,13 @@ const ProductionTab = ({ productionRecords, animals, onAddRecord }: { production
   );
 };
 
-const PotrerosTab = ({ potreros, animals, onAddPotrero, onUpdateAnimal }: { potreros: Potrero[], animals: Animal[], onAddPotrero: (data: any) => void, onUpdateAnimal: (id: string, data: any) => void }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedPotrero, setSelectedPotrero] = useState<Potrero | null>(null);
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-[#1a1a1a]">Potreros</h2>
-          <p className="text-sm text-gray-500">Gestión de zonas de pastoreo</p>
-        </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-[#2e7d32] text-white px-6 py-3 rounded-xl font-bold hover:bg-[#1b5e20] transition-colors shadow-lg shadow-[#2e7d32]/20"
-        >
-          <Plus size={20} />
-          <span>Nuevo Potrero</span>
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-        {potreros.map(potrero => {
-          const potreroAnimals = animals.filter(a => a.id_potrero === potrero.id);
-          return (
-            <div 
-              key={potrero.id} 
-              className="app-card border-l-4 border-[#2e7d32] cursor-pointer hover:border-[#2e7d32]/50 transition-all active:scale-[0.98]"
-              onClick={() => {
-                setSelectedPotrero(potrero);
-                setIsDetailsOpen(true);
-              }}
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div className="p-2.5 rounded-xl bg-[#2e7d32]/10 text-[#2e7d32]">
-                  <MapIcon size={24} />
-                </div>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                  {potreroAnimals.length} Animales
-                </span>
-              </div>
-              <h4 className="text-xl font-bold text-[#1a1a1a] mb-4">{potrero.nombre}</h4>
-              
-              <div className="space-y-2 mb-6">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Animales en zona:</p>
-                <div className="flex flex-wrap gap-2">
-                  {potreroAnimals.slice(0, 5).map(animal => (
-                    <span key={animal.id} className="px-2 py-1 rounded-lg bg-gray-50 text-[10px] font-bold text-gray-600 border border-gray-100">
-                      {animal.id_arete}
-                    </span>
-                  ))}
-                  {potreroAnimals.length > 5 && (
-                    <span className="px-2 py-1 rounded-lg bg-gray-50 text-[10px] font-bold text-gray-400 border border-gray-100">
-                      +{potreroAnimals.length - 5} más
-                    </span>
-                  )}
-                  {potreroAnimals.length === 0 && (
-                    <span className="text-[10px] italic text-gray-400">Sin animales</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-gray-50 flex justify-between items-center">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Estado</span>
-                <span className="text-[10px] font-bold text-[#2e7d32] uppercase tracking-widest">Activo</span>
-              </div>
-            </div>
-          );
-        })}
-        {potreros.length === 0 && (
-          <div className="col-span-full py-20 text-center bg-white rounded-3xl border border-dashed border-gray-200">
-            <div className="flex flex-col items-center gap-3 opacity-40">
-              <MapIcon size={48} />
-              <p className="font-bold text-sm uppercase tracking-widest">No hay potreros registrados</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <PotreroModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onAdd={onAddPotrero} 
-      />
-
-      <PotreroDetailsModal 
-        isOpen={isDetailsOpen}
-        onClose={() => setIsDetailsOpen(false)}
-        potrero={selectedPotrero}
-        animals={animals.filter(a => !a.id_propietario?.startsWith('vendido_'))}
-        potreros={potreros}
-        onUpdateAnimal={onUpdateAnimal}
-      />
-    </div>
-  );
-};
 
 const AnimalsModal: React.FC<{ 
   isOpen: boolean, 
   onClose: () => void, 
   animals: Animal[], 
-  potreros: Potrero[],
+  potreros?: Potrero[],
   searchTerm: string,
   setSearchTerm: (s: string) => void,
   onAddNew: () => void,
@@ -1800,7 +1543,7 @@ const AnimalsModal: React.FC<{
   onTransfer: (animal: Animal) => void,
   onShowQR: (animal: Animal) => void,
   onSell: (animal: Animal) => void
-}> = ({ isOpen, onClose, animals, potreros, searchTerm, setSearchTerm, onAddNew, onEdit, onTransfer, onShowQR, onSell }) => {
+}> = ({ isOpen, onClose, animals, potreros = [], searchTerm, setSearchTerm, onAddNew, onEdit, onTransfer, onShowQR, onSell }) => {
   const [cattleFilter, setCattleFilter] = useState<'activos' | 'vendidos'>('activos');
 
   if (!isOpen) return null;
@@ -1899,7 +1642,7 @@ const AnimalsModal: React.FC<{
               <AnimalCard 
                 key={animal.id} 
                 animal={animal} 
-                potreros={potreros} 
+                potreros={potreros}
                 onClick={() => onEdit(animal)}
                 onTransfer={(e) => {
                   e.stopPropagation();
@@ -1929,26 +1672,118 @@ const AnimalsModal: React.FC<{
     </div>
   );
 };
- const AnimalFormModal = ({ 
-  isOpen, 
+  const PotreroModal = ({ isOpen, onClose, onAdd, onUpdate, editingPotrero }: {
+  isOpen: boolean,
+  onClose: () => void,
+  onAdd: (data: any) => void,
+  onUpdate: (id: string, data: any) => void,
+  editingPotrero: Potrero | null
+}) => {
+  const [formData, setFormData] = useState({
+    nombre: '',
+    descripcion: '',
+    capacidad: '' as any
+  });
+
+  useEffect(() => {
+    if (editingPotrero) {
+      setFormData({
+        nombre: editingPotrero.nombre,
+        descripcion: editingPotrero.descripcion || '',
+        capacidad: editingPotrero.capacidad || ''
+      });
+    } else {
+      setFormData({ nombre: '', descripcion: '', capacidad: '' });
+    }
+  }, [editingPotrero, isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl">
+        <div className="flex justify-between items-center mb-8">
+          <h3 className="text-2xl font-black text-primary tracking-tight">
+            {editingPotrero ? 'Editar Corral' : 'Nuevo Corral'}
+          </h3>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X size={24} /></button>
+        </div>
+
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          const data = {
+            ...formData,
+            capacidad: parseInt(formData.capacidad) || 0
+          };
+          if (editingPotrero) {
+            onUpdate(editingPotrero.id, data);
+          } else {
+            onAdd(data);
+          }
+          onClose();
+        }} className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Nombre</label>
+            <input 
+              required 
+              type="text" 
+              placeholder="Ej: Corral Norte" 
+              value={formData.nombre} 
+              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })} 
+              className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium" 
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Descripción</label>
+            <textarea 
+              placeholder="Detalles adicionales..." 
+              value={formData.descripcion} 
+              onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })} 
+              className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium min-h-[100px] resize-none" 
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Capacidad Máxima</label>
+            <input 
+              type="number" 
+              placeholder="Ej: 50" 
+              value={formData.capacidad} 
+              onChange={(e) => setFormData({ ...formData, capacidad: e.target.value })} 
+              className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-primary/20 outline-none font-medium" 
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={onClose} className="flex-1 px-6 py-3.5 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-sm">Cancelar</button>
+            <button type="submit" className="flex-[2] px-6 py-3.5 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm">
+              {editingPotrero ? 'Actualizar' : 'Guardar'}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
+const AnimalFormModal = ({ 
+   isOpen, 
   onClose, 
   onAdd,
   onUpdate,
   onDelete,
-  potreros,
-  initialPotrero = '',
   editingAnimal = null,
-  ranchName = ''
+  ranchName = '',
+  potreros = []
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
   onAdd: (data: any) => Promise<void>,
   onUpdate: (id: string, data: any) => Promise<void>,
   onDelete?: (animal: Animal) => void,
-  potreros: Potrero[],
-  initialPotrero?: string,
   editingAnimal?: Animal | null,
-  ranchName?: string
+  ranchName?: string,
+  potreros?: Potrero[]
 }) => {
   const [formData, setFormData] = useState({
     nombre: '',
@@ -1957,7 +1792,7 @@ const AnimalsModal: React.FC<{
     fecha_nacimiento: new Date().toISOString().split('T')[0],
     id_raza: 'raza_1',
     id_categoria: 'cat_4',
-    id_potrero: initialPotrero || '',
+    id_potrero: '',
     peso: editingAnimal ? editingAnimal.peso : '' as any,
     precio: editingAnimal ? editingAnimal.precio : '' as any,
     tipo_produccion: editingAnimal ? editingAnimal.tipo_produccion : 'Carne',
@@ -1994,7 +1829,7 @@ const AnimalsModal: React.FC<{
           fecha_nacimiento: new Date().toISOString().split('T')[0],
           id_raza: 'raza_1',
           id_categoria: 'cat_4',
-          id_potrero: initialPotrero || (potreros[0]?.id || ''),
+          id_potrero: '',
           peso: '',
           precio: '',
           tipo_produccion: 'Carne',
@@ -2005,7 +1840,7 @@ const AnimalsModal: React.FC<{
       setIsSaving(false);
       setShowCamera(false);
     }
-  }, [isOpen, initialPotrero, potreros, editingAnimal]);
+  }, [isOpen, editingAnimal]);
 
   const startCamera = async () => {
     try {
@@ -2203,6 +2038,19 @@ const AnimalsModal: React.FC<{
             </select>
           </div>
           <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-gray-700 ml-1">Corral (Opcional)</label>
+            <select 
+              value={formData.id_potrero}
+              onChange={(e) => setFormData({ ...formData, id_potrero: e.target.value })}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm appearance-none cursor-pointer"
+            >
+              <option value="">Sin corral asignado</option>
+              {potreros.map(p => (
+                <option key={p.id} value={p.id}>{p.nombre}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
             <label className="text-xs font-semibold text-gray-700 ml-1">Peso (kg)</label>
             <input 
               type="number" 
@@ -2251,60 +2099,8 @@ const AnimalsModal: React.FC<{
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-gray-700 ml-1">Origen del Animal</label>
-            <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-200">
-              <button 
-                type="button"
-                onClick={() => setFormData({ ...formData, origen: 'nacido' })}
-                className={cn(
-                  "flex-1 py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase transition-all",
-                  formData.origen === 'nacido' ? "bg-white text-primary shadow-sm" : "text-gray-400 hover:text-gray-600"
-                )}
-              >
-                Nacido
-              </button>
-              <button 
-                type="button"
-                onClick={() => setFormData({ ...formData, origen: 'comprado' })}
-                className={cn(
-                  "flex-1 py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase transition-all",
-                  formData.origen === 'comprado' ? "bg-white text-primary shadow-sm" : "text-gray-400 hover:text-gray-600"
-                )}
-              >
-                Comprado
-              </button>
-            </div>
-          </div>
 
-          {formData.origen === 'comprado' && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-700 ml-1">Precio de Compra ($)</label>
-              <input 
-                type="number" 
-                value={formData.precio}
-                onChange={(e) => setFormData({ ...formData, precio: e.target.value })}
-                placeholder="0.00" 
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm"
-              />
-            </div>
-          )}
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-gray-700 ml-1">Potrero</label>
-            <select 
-              value={formData.id_potrero}
-              onChange={(e) => setFormData({ ...formData, id_potrero: e.target.value })}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#2e7d32]/20 focus:border-[#2e7d32] transition-all text-sm appearance-none cursor-pointer"
-            >
-              {potreros.map(p => (
-                <option key={p.id} value={p.id}>{p.nombre}</option>
-              ))}
-              {potreros.length === 0 && (
-                <option value="">Sin potreros</option>
-              )}
-            </select>
-          </div>
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-gray-700 ml-1">Tipo de Producción</label>
             <input 
@@ -2433,8 +2229,8 @@ export default function App() {
   const [isCommunityOpen, setIsCommunityOpen] = useState(false);
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [potreros, setPotreros] = useState<Potrero[]>([]);
   const [healthEvents, setHealthEvents] = useState<HealthEvent[]>([]);
+  const [potreros, setPotreros] = useState<Potrero[]>([]);
   const [feedingRecords, setFeedingRecords] = useState<FeedingRecord[]>([]);
   const [reproductionEvents, setReproductionEvents] = useState<ReproductionEvent[]>([]);
   const [productionRecords, setProductionRecords] = useState<ProductionRecord[]>([]);
@@ -2445,7 +2241,6 @@ export default function App() {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [animalToDelete, setAnimalToDelete] = useState<Animal | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAnimalsModalOpen, setIsAnimalsModalOpen] = useState(false);
   const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
@@ -2455,8 +2250,6 @@ export default function App() {
   const [isFeedingModalOpen, setIsFeedingModalOpen] = useState(false);
   const [isReproductionModalOpen, setIsReproductionModalOpen] = useState(false);
   const [isProductionModalOpen, setIsProductionModalOpen] = useState(false);
-  const [isPotreroModalOpen, setIsPotreroModalOpen] = useState(false);
-  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -2480,9 +2273,10 @@ export default function App() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
-  const [targetPotrero, setTargetPotrero] = useState<Potrero | null>(null);
-  const [modalInitialPotrero, setModalInitialPotrero] = useState('');
+  const [communityView, setCommunityView] = useState<'profiles' | 'chats' | 'transfers' | 'marketplace'>('profiles');
   const [editingAnimal, setEditingAnimal] = useState<Animal | null>(null);
+  const [isPotreroModalOpen, setIsPotreroModalOpen] = useState(false);
+  const [editingPotrero, setEditingPotrero] = useState<Potrero | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [cattleFilter, setCattleFilter] = useState<'todos' | 'venta' | 'vendidos'>('todos');
   const [localProfile, setLocalProfile] = useState<Partial<UserProfile>>({});
@@ -2704,6 +2498,27 @@ export default function App() {
     return onlineOthers + 1; // Current user included
   }, [publicProfiles, user]);
 
+  // Connection check
+  useEffect(() => {
+    async function testConnection() {
+      try {
+        // Try to reach the server directly to verify connectivity
+        await getDocFromServer(doc(db, '_connection_test', 'status'));
+      } catch (error: any) {
+        if (error?.message?.includes('offline') || error?.message?.includes('Could not reach')) {
+          console.error("Firestore is offline or backend unreachable:", error);
+          setActiveToast({
+            title: 'Sincronización Desconectada',
+            message: 'No podemos conectar con el servidor. Trabajaremos en modo offline hasta reestablecer la señal.',
+            type: 'error'
+          });
+          setTimeout(() => setActiveToast(null), 8000);
+        }
+      }
+    }
+    testConnection();
+  }, []);
+
   // Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
@@ -2870,22 +2685,11 @@ export default function App() {
         updatedAt: serverTimestamp()
       });
 
-      // Record a 'Compra' for the buyer in real-time
-      await addDoc(collection(db, 'finance_transactions'), {
-        userId: user.uid,
-        amount: Number(transfer.price) || 0,
-        type: 'Compra',
-        date: serverTimestamp(),
-        category: 'Compra de Ganado',
-        description: `Compra aceptada: ${transfer.animalName} (#${transfer.animalArete}) de ${transfer.sellerName}`,
-        animalId: transfer.animalId,
-        createdAt: serverTimestamp()
-      });
-
+      // Record a notification for the other party
       const otherPartyId = transfer.sellerId === user.uid ? transfer.buyerId : transfer.sellerId;
       await addDoc(collection(db, 'notifications'), {
         userId: otherPartyId,
-        title: 'Transferencia Aceptada',
+        title: 'Propuesta Aceptada',
         message: `La propuesta para ${transfer.animalName} ha sido aceptada.`,
         date: serverTimestamp(),
         type: 'transfer',
@@ -2964,8 +2768,7 @@ export default function App() {
       const mainBatch = writeBatch(db);
       
       mainBatch.update(doc(db, 'animals', transfer.animalId), {
-        id_propietario: transfer.buyerId,
-        id_potrero: 'sin_asignar' // Reset pasture for new owner
+        id_propietario: transfer.buyerId
       });
 
       mainBatch.update(doc(db, 'animal_transfers', transfer.id), {
@@ -2999,7 +2802,7 @@ export default function App() {
       }
 
       // 4. Update History (Events) to follow the new owner
-      const collectionsToUpdate = ['health_events', 'feeding_records', 'reproduction_events', 'production_records', 'tasks', 'finance_transactions'];
+      const collectionsToUpdate = ['health_events', 'feeding_records', 'reproduction_events', 'production_records', 'tasks'];
       
       for (const collName of collectionsToUpdate) {
         // We fetch ALL records for this animal ID, regardless of current userId, 
@@ -3122,14 +2925,6 @@ export default function App() {
       (error) => handleFirestoreError(error, OperationType.GET, 'notifications', auth)
     );
 
-    const potrerosUnsubscribe = onSnapshot(
-      query(collection(db, 'potreros'), where('userId', '==', user.uid), limit(100)),
-      (snapshot) => {
-        setPotreros(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Potrero)));
-      },
-      (error) => handleFirestoreError(error, OperationType.GET, 'potreros', auth)
-    );
-
     const healthUnsubscribe = onSnapshot(
       query(collection(db, 'health_events'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1000)),
       (snapshot) => {
@@ -3137,6 +2932,14 @@ export default function App() {
         setHealthEvents(data);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'health_events', auth)
+    );
+
+    const potrerosUnsubscribe = onSnapshot(
+      query(collection(db, 'potreros'), where('userId', '==', user.uid), orderBy('nombre', 'asc')),
+      (snapshot) => {
+        setPotreros(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Potrero)));
+      },
+      (error) => handleFirestoreError(error, OperationType.GET, 'potreros', auth)
     );
 
     const feedingUnsubscribe = onSnapshot(
@@ -3285,8 +3088,8 @@ export default function App() {
     return () => {
       animalsUnsubscribe();
       notificationsUnsubscribe();
-      potrerosUnsubscribe();
       healthUnsubscribe();
+      potrerosUnsubscribe();
       feedingUnsubscribe();
       profileUnsubscribe();
       reproductionUnsubscribe();
@@ -3399,9 +3202,8 @@ export default function App() {
     }
   };
 
-  const openAddModal = (potreroId?: string) => {
+  const openAddModal = () => {
     setEditingAnimal(null);
-    setModalInitialPotrero(potreroId || (potreros[0]?.id || ''));
     setIsAddModalOpen(true);
   };
 
@@ -3494,6 +3296,46 @@ export default function App() {
     }
   };
 
+  const handleAddPotrero = async (data: any) => {
+    if (!user) return;
+    try {
+      await addDoc(collection(db, 'potreros'), {
+        ...data,
+        userId: user.uid,
+        createdAt: serverTimestamp()
+      });
+      
+      await addDoc(collection(db, 'notifications'), {
+        userId: user.uid,
+        title: 'Corral Registrado',
+        message: `Se ha registrado el corral ${data.nombre} exitosamente.`,
+        date: serverTimestamp(),
+        type: 'feed',
+        read: false
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'potreros', auth);
+    }
+  };
+
+  const handleUpdatePotrero = async (id: string, data: any) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'potreros', id), data);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `potreros/${id}`, auth);
+    }
+  };
+
+  const handleDeletePotrero = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'potreros', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `potreros/${id}`, auth);
+    }
+  };
+
   const handleDownloadReport = () => {
     const headers = ['Mes', 'Año', 'Ingresos/Ventas ($)'];
     const rows = monthlyData.map(m => [m.name, m.year, m.value]);
@@ -3541,8 +3383,7 @@ export default function App() {
           amount: Number(data.cost),
           date: data.date || serverTimestamp(),
           category: 'Salud',
-          description: `Salud: ${data.type} - ${data.mode === 'grupal' ? data.potreroName : data.animalName}`,
-          relatedId: healthRef.id,
+          description: `Salud: ${data.type} - ${data.animalName}`,
           userId: user.uid,
           createdAt: serverTimestamp()
         });
@@ -3552,8 +3393,8 @@ export default function App() {
         userId: user.uid,
         title: 'Evento de Salud',
         message: data.mode === 'grupal' 
-          ? `Se ha registrado un evento de ${data.description || data.type} para el corral ${data.potreroName}.`
-          : `Se ha registrado un evento de ${data.description || data.type} para el animal ${data.animalName} (#${data.animalId}).`,
+          ? `Se ha registrado ${data.type} para el corral ${data.potreroName}.`
+          : `Se ha registrado ${data.type} para ${data.animalName} (#${data.animalId}).`,
         date: serverTimestamp(),
         type: 'health',
         read: false
@@ -3563,51 +3404,7 @@ export default function App() {
     }
   };
 
-  const handleAddPotrero = async (data: any) => {
-    if (!user) return;
-    try {
-      await addDoc(collection(db, 'potreros'), {
-        ...data,
-        userId: user.uid,
-        createdAt: serverTimestamp()
-      });
-      
-      await addDoc(collection(db, 'notifications'), {
-        userId: user.uid,
-        title: 'Nuevo Potrero',
-        message: `Se ha registrado el potrero ${data.nombre}.`,
-        date: serverTimestamp(),
-        type: 'health',
-        read: false
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'potreros/notifications', auth);
-    }
-  };
 
-  const handleAssignAnimals = async (animalIds: string[], potreroId: string) => {
-    if (!user) return;
-    try {
-      const batch = writeBatch(db);
-      animalIds.forEach(id => {
-        const animalRef = doc(db, 'animals', id);
-        batch.update(animalRef, { id_potrero: potreroId });
-      });
-      await batch.commit();
-      
-      const potrero = potreros.find(p => p.id === potreroId);
-      await addDoc(collection(db, 'notifications'), {
-        userId: user.uid,
-        title: 'Animales Asignados',
-        message: `Se han asignado ${animalIds.length} animales al potrero ${potrero?.nombre}.`,
-        date: serverTimestamp(),
-        type: 'feed',
-        read: false
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'animals', auth);
-    }
-  };
 
   const handleAddFeedingRecord = async (data: any) => {
     if (!user) return;
@@ -3625,7 +3422,7 @@ export default function App() {
           amount: Number(data.cost),
           date: data.date || serverTimestamp(),
           category: 'Alimentación',
-          description: `Alimento: ${data.foodType} para ${data.potreroNombre}`,
+          description: `Alimento: ${data.foodType}`,
           relatedId: feedingRef.id,
           userId: user.uid,
           createdAt: serverTimestamp()
@@ -3635,7 +3432,7 @@ export default function App() {
       await addDoc(collection(db, 'notifications'), {
         userId: user.uid,
         title: 'Registro de Alimentación',
-        message: `Se ha registrado alimento para el potrero ${data.potreroId}.`,
+        message: `Se ha registrado alimento (${data.foodType}) ${data.potreroName ? `en ${data.potreroName}` : 'al hato'}.`,
         date: serverTimestamp(),
         type: 'feed',
         read: false
@@ -3790,6 +3587,9 @@ export default function App() {
         updatedAt: serverTimestamp()
       });
 
+      // Delete the marketplace offer as requested
+      await deleteDoc(doc(db, 'marketplace_offers', offer.id));
+
       await addDoc(collection(db, 'notifications'), {
         userId: offer.sellerId,
         title: 'Interés en Mercado',
@@ -3802,10 +3602,13 @@ export default function App() {
 
       setActiveToast({
         title: 'Propuesta Enviada',
-        message: 'Se ha enviado tu interés al vendedor.',
+        message: 'Se ha enviado tu interés y ahora puedes verla en Transferencias.',
         type: 'transfer'
       });
       setTimeout(() => setActiveToast(null), 3000);
+
+      // Redirect to transfers view
+      setCommunityView('transfers');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'animal_transfers', auth);
     }
@@ -3890,7 +3693,6 @@ export default function App() {
     try {
       const collectionsToClear = [
         'animals',
-        'potreros',
         'notifications',
         'health_events',
         'feeding_records',
@@ -4064,8 +3866,8 @@ export default function App() {
         </button>
         <nav className="flex-1 overflow-y-auto no-scrollbar space-y-1">
           <SidebarItem icon={LayoutDashboard} label="Inicio" active={activeTab === 'inicio'} onClick={() => setActiveTab('inicio')} />
+          <SidebarItem icon={Database} label="Corrales" active={activeTab === 'potreros'} onClick={() => setActiveTab('potreros')} />
           <SidebarItem icon={Users} label="Ganado" active={activeTab === 'ganado'} onClick={() => setActiveTab('ganado')} />
-          <SidebarItem icon={MapIcon} label="Corrales" active={activeTab === 'corrales'} onClick={() => setActiveTab('corrales')} />
           <SidebarItem icon={Stethoscope} label="Sanidad" active={activeTab === 'sanidad'} onClick={() => setActiveTab('sanidad')} />
           <SidebarItem icon={Wheat} label="Alimentación" active={activeTab === 'feeding'} onClick={() => setActiveTab('feeding')} />
           <SidebarItem icon={Dna} label="Reproducción" active={activeTab === 'reproduction'} onClick={() => setActiveTab('reproduction')} />
@@ -4428,9 +4230,9 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeTab === 'corrales' && (
+            {activeTab === 'potreros' && (
               <motion.div 
-                key="corrales"
+                key="potreros"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -4439,96 +4241,79 @@ export default function App() {
                 <div className="flex justify-between items-center px-2">
                   <h2 className="text-3xl font-black text-primary tracking-tight font-display">Corrales</h2>
                   <button 
-                    onClick={() => setIsPotreroModalOpen(true)}
-                    className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/20"
+                    onClick={() => {
+                      setEditingPotrero(null);
+                      setIsPotreroModalOpen(true);
+                    }}
+                    className="p-4 bg-primary text-white rounded-2xl shadow-lg shadow-primary/20"
                   >
                     <Plus size={24} />
                   </button>
                 </div>
 
-                {/* Stats Grid */}
-                <div className="grid grid-cols-3 gap-4 px-2">
-                  <div className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm text-center">
-                    <p className="text-3xl font-black text-primary">{potreros.length}</p>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Corrales</p>
-                  </div>
-                  <div className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm text-center">
-                    <p className="text-3xl font-black text-secondary">{activeAnimals.filter(a => a.id_potrero).length}</p>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Ubicados</p>
-                  </div>
-                  <div className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm text-center">
-                    <p className="text-3xl font-black text-red-500">{activeAnimals.filter(a => !a.id_potrero).length}</p>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Sin ubicar</p>
-                  </div>
-                </div>
-
-                {/* Potreros List */}
-                <div className="space-y-4 px-2">
-                  {potreros.map(potrero => {
-                    const animalCount = activeAnimals.filter(a => a.id_potrero === potrero.id).length;
-                    const freeSpace = potrero.capacidad - animalCount;
-                    const occupancyPercent = (animalCount / potrero.capacidad) * 100;
-
-                    return (
-                      <div key={potrero.id} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-2">
+                  {potreros.map(p => (
+                    <div 
+                      key={p.id} 
+                      className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-md transition-all group relative overflow-hidden"
+                    >
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-[5rem] -mr-8 -mt-8 group-hover:scale-110 transition-transform" />
+                      
+                      <div className="relative space-y-6">
                         <div className="flex justify-between items-start">
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-2xl bg-secondary/10 text-secondary flex items-center justify-center">
-                              <MapIcon size={24} />
-                            </div>
-                            <div>
-                              <h4 className="font-black text-primary text-lg">{potrero.nombre}</h4>
-                              <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">{animalCount} Animales</p>
-                            </div>
+                          <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+                            <Database size={28} />
                           </div>
-                          <button className="p-2 text-gray-400 hover:text-primary transition-colors">
-                            <MoreHorizontal size={20} />
-                          </button>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest">
-                            <span className="text-gray-400">Ocupación</span>
-                            <span className={cn(
-                              occupancyPercent > 90 ? "text-red-500" : "text-secondary"
-                            )}>{Math.round(occupancyPercent)}%</span>
-                          </div>
-                          <div className="progress-bar-container">
-                            <motion.div 
-                              initial={{ width: 0 }}
-                              animate={{ width: `${occupancyPercent}%` }}
-                              className={cn(
-                                "progress-bar-fill",
-                                occupancyPercent > 90 ? "bg-red-500" : "bg-secondary"
-                              )}
-                            />
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => {
+                                setEditingPotrero(p);
+                                setIsPotreroModalOpen(true);
+                              }}
+                              className="p-2 hover:bg-gray-50 rounded-xl text-gray-400 hover:text-primary transition-colors"
+                            >
+                              <Edit3 size={18} />
+                            </button>
+                            <button 
+                              onClick={() => {
+                                if(confirm('¿Seguro que deseas eliminar este corral?')) {
+                                  handleDeletePotrero(p.id);
+                                }
+                              }}
+                              className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={18} />
+                            </button>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4 pt-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-green-500" />
-                            <span className="text-xs font-bold text-gray-600">{freeSpace} Libres</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-gray-200" />
-                            <span className="text-xs font-bold text-gray-600">{potrero.capacidad} Capacidad</span>
-                          </div>
+                        <div>
+                          <h3 className="text-2xl font-black text-primary tracking-tight">{p.nombre}</h3>
+                          <p className="text-sm text-gray-500 font-medium line-clamp-1">{p.descripcion || 'Sin descripción'}</p>
                         </div>
 
-                        <button 
-                          onClick={() => {
-                            setTargetPotrero(potrero);
-                            setIsAssignModalOpen(true);
-                          }}
-                          className="w-full mt-4 py-4 bg-primary text-white rounded-2xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all flex items-center justify-center gap-3"
-                        >
-                          <ArrowLeftRight size={20} />
-                          Asignar
-                        </button>
+                        <div className="pt-6 border-t border-gray-50 flex items-center justify-between">
+                          <div>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Animales</p>
+                            <p className="text-lg font-black text-primary">
+                              {animals.filter(a => a.id_potrero === p.id).length}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Capacidad</p>
+                            <p className="text-lg font-black text-secondary">{p.capacidad || '∞'}</p>
+                          </div>
+                        </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
+                  {potreros.length === 0 && (
+                    <div className="col-span-full py-24 text-center bg-white rounded-[2.5rem] border border-dashed border-gray-200">
+                      <Database size={48} className="mx-auto mb-4 text-gray-200" />
+                      <h3 className="text-xl font-bold text-primary mb-2">No hay corrales registrados</h3>
+                      <p className="text-gray-400 max-w-xs mx-auto text-sm">Organiza tu ganado creando divisiones o corrales específicos.</p>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -4605,7 +4390,7 @@ export default function App() {
                           <div className="flex-1">
                             <p className="font-bold text-primary">{event.type}</p>
                             <p className="text-xs text-gray-400 font-medium">
-                              {event.animalName || `Animal ID: ${event.animalId}`} • {safeFormatDate(event.date, 'dd MMM yyyy')}
+                              {event.mode === 'grupal' ? `Corral: ${event.potreroName}` : (event.animalName || `Animal ID: ${event.animalId}`)} • {safeFormatDate(event.date, 'dd MMM yyyy')}
                             </p>
                           </div>
                           <div className="text-right">
@@ -4651,12 +4436,12 @@ export default function App() {
                   <section className="space-y-4">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-[0.2em] ml-2">Gestión</h3>
                     <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden">
-                      <button onClick={() => setActiveTab('corrales')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors border-b border-gray-50">
+                      <button onClick={() => setActiveTab('potreros')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors border-b border-gray-50">
                         <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-xl bg-secondary/10 text-secondary flex items-center justify-center">
-                            <MapIcon size={20} />
+                          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                            <Database size={20} />
                           </div>
-                          <span className="font-bold text-primary">Potreros y Corrales</span>
+                          <span className="font-bold text-primary">Corrales (Potreros)</span>
                         </div>
                         <ChevronRight size={18} className="text-gray-300" />
                       </button>
@@ -4755,7 +4540,7 @@ export default function App() {
                 {/* Production Chart */}
                 <section className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
                   <div className="flex justify-between items-center">
-                    <h3 className="text-lg font-black text-primary">Producción Mensual</h3>
+                    <h3 className="text-lg font-black text-primary">Ingresos Mensuales</h3>
                     <select className="bg-gray-50 border-none rounded-xl text-xs font-bold text-gray-500 px-3 py-2 outline-none">
                       <option>Últimos 6 meses</option>
                       <option>Este año</option>
@@ -4864,6 +4649,8 @@ export default function App() {
                 onBuyOffer={handleBuyOffer}
                 reviews={reviews}
                 onOpenAnimals={() => setIsAnimalsModalOpen(true)}
+                view={communityView}
+                setView={setCommunityView}
               />
             )}
 
@@ -5163,12 +4950,13 @@ export default function App() {
                           </div>
                           <div>
                             <p className="font-bold text-primary">{r.foodType}</p>
-                            <p className="text-xs text-gray-400">{safeFormatDate(r.date)}</p>
+                            <p className="text-xs text-gray-400">
+                              {safeFormatDate(r.date)} {r.potreroName ? `• ${r.potreroName}` : ''}
+                            </p>
                           </div>
                         </div>
                         <span className="status-badge bg-orange-50 text-orange-600">{r.quantity} {r.unit}</span>
                       </div>
-                      <p className="text-sm text-gray-500 font-medium">{r.potreroNombre}</p>
                     </div>
                   ))}
                 </div>
@@ -5441,7 +5229,6 @@ export default function App() {
         onClose={() => { 
           setIsAddModalOpen(false); 
           setEditingAnimal(null); 
-          setModalInitialPotrero('');
         }} 
         onAdd={handleAddAnimal}
         onUpdate={handleUpdateAnimal}
@@ -5449,10 +5236,17 @@ export default function App() {
           setAnimalToDelete(animal);
           setIsDeleteConfirmOpen(true);
         }}
-        potreros={potreros}
-        initialPotrero={modalInitialPotrero}
         editingAnimal={editingAnimal}
         ranchName={userProfile?.ranchName}
+        potreros={potreros}
+      />
+
+      <PotreroModal 
+        isOpen={isPotreroModalOpen}
+        onClose={() => setIsPotreroModalOpen(false)}
+        onAdd={handleAddPotrero}
+        onUpdate={handleUpdatePotrero}
+        editingPotrero={editingPotrero}
       />
 
       <AnimalsModal 
@@ -5483,8 +5277,15 @@ export default function App() {
         onClose={() => setIsHealthModalOpen(false)}
         animals={activeAnimals}
         potreros={potreros}
-        mode={healthModalMode}
         onAdd={handleAddHealthEvent}
+        initialMode={healthModalMode}
+      />
+
+      <FeedingRecordModal 
+        isOpen={isFeedingModalOpen}
+        onClose={() => setIsFeedingModalOpen(false)}
+        onAdd={handleAddFeedingRecord}
+        potreros={potreros}
       />
 
       <FinanceModal
@@ -5539,7 +5340,6 @@ export default function App() {
         healthEvents={healthEvents}
         productionRecords={productionRecords}
         financeTransactions={financeTransactions}
-        potreros={potreros}
       />
 
       <QRCodeModal
@@ -5561,7 +5361,6 @@ export default function App() {
       <FeedingModal 
         isOpen={isFeedingModalOpen}
         onClose={() => setIsFeedingModalOpen(false)}
-        potreros={potreros}
         onAdd={handleAddFeedingRecord}
       />
 
@@ -5579,26 +5378,12 @@ export default function App() {
         onAdd={handleAddProductionRecord}
       />
 
-      <PotreroFormModal 
-        isOpen={isPotreroModalOpen}
-        onClose={() => setIsPotreroModalOpen(false)}
-        onAdd={handleAddPotrero}
-      />
-
-      <AssignAnimalsModal
-        isOpen={isAssignModalOpen}
-        onClose={() => setIsAssignModalOpen(false)}
-        animals={activeAnimals}
-        targetPotrero={targetPotrero}
-        onAssign={handleAssignAnimals}
-      />
-
       <ConfirmModal 
         isOpen={isResetConfirmOpen}
         onClose={() => setIsResetConfirmOpen(false)}
         onConfirm={handleResetData}
         title="¿Borrar todos los datos?"
-        message="Esta acción eliminará permanentemente todos los animales, potreros, movimientos y registros financieros. No se puede deshacer."
+        message="Esta acción eliminará permanentemente todos los animales, movimientos y registros financieros. No se puede deshacer."
         confirmText="Sí, Borrar Todo"
         isLoading={isResetting}
       />
@@ -5887,168 +5672,8 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText,
   );
 };
 
-const AssignAnimalsModal = ({ isOpen, onClose, animals, targetPotrero, onAssign }: { 
-  isOpen: boolean, 
-  onClose: () => void, 
-  animals: Animal[], 
-  targetPotrero: Potrero | null,
-  onAssign: (ids: string[], potreroId: string) => void 
-}) => {
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-
-  const availableAnimals = animals.filter(a => 
-    a.id_potrero !== targetPotrero?.id && 
-    (a.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || a.id_arete.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
-
-  if (!isOpen || !targetPotrero) return null;
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-  };
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h3 className="text-2xl font-black text-primary tracking-tight">Asignar a {targetPotrero.nombre}</h3>
-            <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Selecciona los animales a mover</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X size={24} /></button>
-        </div>
-
-        <div className="relative mb-6">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-          <input 
-            type="text" 
-            placeholder="Buscar por nombre o arete..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 pl-12 pr-6 outline-none font-medium"
-          />
-        </div>
-
-        <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-          {availableAnimals.map(animal => (
-            <div 
-              key={animal.id}
-              onClick={() => toggleSelect(animal.id)}
-              className={cn(
-                "flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer",
-                selectedIds.includes(animal.id) 
-                  ? "bg-primary/5 border-primary shadow-sm" 
-                  : "bg-white border-gray-100 hover:border-gray-200"
-              )}
-            >
-              <div className="flex items-center gap-4">
-                <div className={cn(
-                  "w-10 h-10 rounded-xl flex items-center justify-center",
-                  selectedIds.includes(animal.id) ? "bg-primary text-white" : "bg-gray-100 text-gray-400"
-                )}>
-                  <Activity size={20} />
-                </div>
-                <div>
-                  <h4 className="font-bold text-primary">{animal.nombre}</h4>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">#{animal.id_arete}</p>
-                </div>
-              </div>
-              <div className={cn(
-                "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
-                selectedIds.includes(animal.id) ? "bg-primary border-primary" : "border-gray-200"
-              )}>
-                {selectedIds.includes(animal.id) && <Plus size={14} className="text-white" />}
-              </div>
-            </div>
-          ))}
-          {availableAnimals.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-gray-400 font-medium">No se encontraron animales disponibles.</p>
-            </div>
-          )}
-        </div>
-
-        <div className="pt-6 mt-6 border-t border-gray-100 flex gap-4">
-          <button 
-            onClick={onClose}
-            className="flex-1 py-4 bg-gray-50 text-gray-600 rounded-2xl font-bold hover:bg-gray-100 transition-colors"
-          >
-            Cancelar
-          </button>
-          <button 
-            disabled={selectedIds.length === 0}
-            onClick={() => {
-              onAssign(selectedIds, targetPotrero.id);
-              onClose();
-            }}
-            className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-primary/20 disabled:opacity-50 disabled:shadow-none"
-          >
-            Asignar
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-const PotreroFormModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: () => void, onAdd: (data: any) => void }) => {
+const FeedingModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: () => void, onAdd: (data: any) => void }) => {
   const [formData, setFormData] = useState({
-    nombre: '',
-    capacidad: '' as any,
-    area: '' as any,
-    comunidad: '',
-    cp: ''
-  });
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl overflow-hidden">
-        <div className="flex justify-between items-center mb-8">
-          <h3 className="text-2xl font-black text-primary tracking-tight">Nuevo Potrero</h3>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X size={24} /></button>
-        </div>
-        <form onSubmit={(e) => {
-          e.preventDefault();
-          onAdd({
-            ...formData,
-            capacidad: parseInt(formData.capacidad as any) || 0,
-            area: parseFloat(formData.area as any) || 0
-          });
-          onClose();
-        }} className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Nombre del Potrero</label>
-            <input type="text" required placeholder="Ej: El Mezquite" value={formData.nombre} onChange={(e) => setFormData({ ...formData, nombre: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Capacidad (Animales)</label>
-              <input type="number" required value={formData.capacidad} onChange={(e) => setFormData({ ...formData, capacidad: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Área (Hectáreas)</label>
-              <input type="number" required value={formData.area} onChange={(e) => setFormData({ ...formData, area: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Comunidad / Ubicación</label>
-            <input type="text" placeholder="Ej: Pinos (Centro)" value={formData.comunidad} onChange={(e) => setFormData({ ...formData, comunidad: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
-          </div>
-          <button type="submit" className="w-full py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-primary/20">Registrar Potrero</button>
-        </form>
-      </motion.div>
-    </div>
-  );
-};
-
-const FeedingModal = ({ isOpen, onClose, potreros, onAdd }: { isOpen: boolean, onClose: () => void, potreros: Potrero[], onAdd: (data: any) => void }) => {
-  const [formData, setFormData] = useState({
-    potreroId: '',
     tipo_alimento: '',
     cantidad: '',
     unidad: 'kg',
@@ -6069,23 +5694,14 @@ const FeedingModal = ({ isOpen, onClose, potreros, onAdd }: { isOpen: boolean, o
         </div>
         <form onSubmit={(e) => {
           e.preventDefault();
-          const potrero = potreros.find(p => p.id === formData.potreroId);
           onAdd({ 
             ...formData, 
             cantidad: parseFloat(formData.cantidad), 
             cost: parseFloat(formData.cost) || 0,
-            potreroNombre: potrero?.nombre || '',
             date: new Date(formData.date) 
           });
           onClose();
         }} className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Potrero</label>
-            <select required value={formData.potreroId} onChange={(e) => setFormData({ ...formData, potreroId: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium">
-              <option value="">Seleccionar Potrero</option>
-              {potreros.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-            </select>
-          </div>
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Tipo de Alimento</label>
             <input type="text" required placeholder="Ej: Concentrado, Heno..." value={formData.tipo_alimento} onChange={(e) => setFormData({ ...formData, tipo_alimento: e.target.value })} className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 outline-none font-medium" />
@@ -6289,7 +5905,15 @@ const ComingSoonModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => 
   );
 };
 
-const HealthEventModal = ({ isOpen, onClose, animals, potreros, mode, onAdd }: { isOpen: boolean, onClose: () => void, animals: Animal[], potreros: Potrero[], mode: 'individual' | 'grupal', onAdd: (data: any) => void }) => {
+const HealthEventModal = ({ isOpen, onClose, animals, potreros = [], onAdd, initialMode = 'individual' }: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  animals: Animal[], 
+  potreros?: Potrero[],
+  onAdd: (data: any) => void,
+  initialMode?: 'individual' | 'grupal'
+}) => {
+  const [mode, setMode] = useState<'individual' | 'grupal'>(initialMode);
   const [formData, setFormData] = useState({
     animalId: '',
     potreroId: '',
@@ -6300,6 +5924,10 @@ const HealthEventModal = ({ isOpen, onClose, animals, potreros, mode, onAdd }: {
     date: new Date().toISOString().split('T')[0]
   });
 
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode, isOpen]);
+
   if (!isOpen) return null;
 
   return (
@@ -6307,7 +5935,7 @@ const HealthEventModal = ({ isOpen, onClose, animals, potreros, mode, onAdd }: {
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl overflow-hidden">
         <div className="flex justify-between items-center mb-8">
-          <h3 className="text-2xl font-black text-primary tracking-tight">Evento de Salud {mode === 'grupal' ? '(Grupal)' : '(Individual)'}</h3>
+          <h3 className="text-2xl font-black text-primary tracking-tight">Evento de Salud</h3>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X size={24} /></button>
         </div>
 
@@ -6317,14 +5945,31 @@ const HealthEventModal = ({ isOpen, onClose, animals, potreros, mode, onAdd }: {
           const potrero = potreros.find(p => p.id === formData.potreroId);
           onAdd({
             ...formData,
-            animalName: animal?.nombre || '',
-            potreroName: potrero?.nombre || '',
-            cost: parseFloat(formData.cost) || 0,
             mode,
+            animalName: mode === 'individual' ? (animal?.nombre || '') : undefined,
+            potreroName: mode === 'grupal' ? (potrero?.nombre || '') : undefined,
+            cost: parseFloat(formData.cost) || 0,
             date: new Date(formData.date)
           });
           onClose();
         }} className="space-y-6">
+          <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-100">
+            <button 
+              type="button"
+              onClick={() => setMode('individual')}
+              className={cn("flex-1 py-2 text-xs font-bold rounded-lg transition-all", mode === 'individual' ? "bg-white text-primary shadow-sm" : "text-gray-400")}
+            >
+              Individual
+            </button>
+            <button 
+              type="button"
+              onClick={() => setMode('grupal')}
+              className={cn("flex-1 py-2 text-xs font-bold rounded-lg transition-all", mode === 'grupal' ? "bg-white text-primary shadow-sm" : "text-gray-400")}
+            >
+              Por Corral
+            </button>
+          </div>
+
           {mode === 'individual' ? (
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Animal</label>
@@ -6714,7 +6359,9 @@ const CommunityView = ({
   marketplaceOffers,
   onBuyOffer,
   reviews,
-  onOpenAnimals
+  onOpenAnimals,
+  view,
+  setView
 }: { 
   profiles: PublicProfile[], 
   onStartChat: (id: string) => void,
@@ -6730,9 +6377,10 @@ const CommunityView = ({
   marketplaceOffers: MarketplaceOffer[],
   onBuyOffer: (offer: MarketplaceOffer) => void,
   reviews: Review[],
-  onOpenAnimals: () => void
+  onOpenAnimals: () => void,
+  view: 'profiles' | 'chats' | 'transfers' | 'marketplace',
+  setView: (view: 'profiles' | 'chats' | 'transfers' | 'marketplace') => void
 }) => {
-  const [view, setView] = useState<'profiles' | 'chats' | 'transfers' | 'marketplace'>('profiles');
   const [transferTab, setTransferTab] = useState<'active' | 'history'>('active');
 
   return (
@@ -7398,14 +7046,13 @@ const TaskFormModal = ({ isOpen, onClose, onAdd, initialData }: {
   );
 };
 
-const ReportsModal = ({ isOpen, onClose, animals, financeTransactions, healthEvents, productionRecords, potreros }: {
+const ReportsModal = ({ isOpen, onClose, animals, financeTransactions, healthEvents, productionRecords }: {
   isOpen: boolean,
   onClose: () => void,
   animals: Animal[],
   financeTransactions: FinanceTransaction[],
   healthEvents: HealthEvent[],
-  productionRecords: ProductionRecord[],
-  potreros: Potrero[]
+  productionRecords: ProductionRecord[]
 }) => {
   if (!isOpen) return null;
 
@@ -7421,8 +7068,7 @@ const ReportsModal = ({ isOpen, onClose, animals, financeTransactions, healthEve
       'Peso (kg)': a.peso,
       'Precio': a.precio || 0,
       'Producción': a.tipo_produccion,
-      'Fecha Nacimiento': a.fecha_nacimiento,
-      'Ubicación': potreros.find(p => p.id === a.id_potrero)?.nombre || 'Sin asignar'
+      'Fecha Nacimiento': a.fecha_nacimiento
     }));
     const animalsWS = XLSX.utils.json_to_sheet(animalsData);
     XLSX.utils.book_append_sheet(wb, animalsWS, "Animales");
@@ -7481,10 +7127,10 @@ const ReportsModal = ({ isOpen, onClose, animals, financeTransactions, healthEve
       a.id_arete, 
       a.sexo === 'M' ? 'Macho' : 'Hembra', 
       a.peso + 'kg',
-      potreros.find(p => p.id === a.id_potrero)?.nombre || 'N/A'
+      'Activo'
     ]);
     autoTable(doc, {
-      head: [['Nombre', 'Arete', 'Sexo', 'Peso', 'Ubicación']],
+      head: [['Nombre', 'Arete', 'Sexo', 'Peso', 'Estado']],
       body: animalTable,
       startY: 45,
       theme: 'grid',

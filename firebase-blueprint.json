@@ -28,6 +28,17 @@
         "descripcion": { "type": "string" }
       }
     },
+    "Potrero": {
+      "title": "Potrero",
+      "description": "Corral o división del terreno.",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "descripcion": { "type": "string" },
+        "capacidad": { "type": "number" },
+        "userId": { "type": "string" }
+      }
+    },
     "Finca": {
       "title": "Finca",
       "description": "Ubicación de la finca.",
@@ -37,18 +48,6 @@
         "ubicacion": { "type": "string", "description": "Coordenadas o dirección" },
         "lat": { "type": "number" },
         "lng": { "type": "number" }
-      }
-    },
-    "Potrero": {
-      "title": "Potrero",
-      "description": "Áreas dentro de la finca.",
-      "type": "object",
-      "properties": {
-        "nombre": { "type": "string" },
-        "id_finca": { "type": "string" },
-        "lat": { "type": "number" },
-        "lng": { "type": "number" },
-        "userId": { "type": "string" }
       }
     },
     "Salud": {
@@ -83,6 +82,9 @@
         "animalId": { "type": "string" },
         "animalName": { "type": "string" },
         "animalArete": { "type": "string" },
+        "potreroId": { "type": "string" },
+        "potreroName": { "type": "string" },
+        "mode": { "type": "string", "enum": ["individual", "grupal"] },
         "type": { "type": "string" },
         "description": { "type": "string" },
         "cost": { "type": "number" },
@@ -95,11 +97,11 @@
       "description": "Registro de alimentación.",
       "type": "object",
       "properties": {
-        "potreroId": { "type": "string" },
-        "potreroNombre": { "type": "string" },
         "foodType": { "type": "string" },
         "quantity": { "type": "number" },
         "unit": { "type": "string" },
+        "potreroId": { "type": "string" },
+        "potreroName": { "type": "string" },
         "date": { "type": "string", "format": "date-time" },
         "userId": { "type": "string" }
       }
@@ -267,9 +269,9 @@
   },
   "firestore": {
     "/animals": { "schema": "Animal", "description": "Colección de animales" },
+    "/potreros": { "schema": "Potrero", "description": "Colección de potreros/corrales" },
     "/razas": { "schema": "Raza", "description": "Colección de razas" },
     "/fincas": { "schema": "Finca", "description": "Colección de fincas" },
-    "/potreros": { "schema": "Potrero", "description": "Colección de potreros" },
     "/salud": { "schema": "Salud", "description": "Colección de salud" },
     "/notifications": { "schema": "Notification", "description": "Colección de notificaciones" },
     "/health_events": { "schema": "HealthEvent", "description": "Colección de eventos de salud" },

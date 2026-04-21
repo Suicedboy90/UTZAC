@@ -53,11 +53,20 @@ service cloud.firestore {
     }
 
     function isValidAnimal(data) {
-      return hasRequiredFields(['nombre', 'id_arete', 'sexo', 'fecha_nacimiento', 'id_raza', 'id_categoria', 'id_potrero', 'peso', 'id_propietario']) &&
+      return hasRequiredFields(['nombre', 'id_arete', 'sexo', 'fecha_nacimiento', 'id_raza', 'id_categoria', 'peso', 'id_propietario']) &&
              data.nombre is string && data.nombre.size() < 100 &&
              data.id_arete is string && data.id_arete.size() < 50 &&
              data.sexo in ['M', 'H'] &&
-             data.peso is number && data.peso >= 0;
+             data.peso is number && data.peso >= 0 &&
+             (!('id_potrero' in data) || (data.id_potrero is string && data.id_potrero.size() < 100));
+    }
+
+    function isValidPotrero(data) {
+      return hasRequiredFields(['nombre', 'userId']) &&
+             data.nombre is string && data.nombre.size() < 100 &&
+             data.userId == request.auth.uid &&
+             (!('descripcion' in data) || (data.descripcion is string && data.descripcion.size() < 500)) &&
+             (!('capacidad' in data) || (data.capacidad is number && data.capacidad >= 0));
     }
 
     function isValidReproductionEvent(data) {
@@ -161,6 +170,14 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isAnimalOwner(resource.data);
     }
 
+    // Potreros
+    match /potreros/{potreroId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidPotrero(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidPotrero(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
     // Razas
     match /razas/{razaId} {
       allow read: if isAuthenticated();
@@ -175,27 +192,34 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
-    // Potreros
-    match /potreros/{potreroId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    function isValidNotification(data) {
+      return hasRequiredFields(['userId', 'title', 'message', 'date', 'read', 'type']) &&
+             data.userId is string &&
+             data.title is string && data.title.size() < 200 &&
+             data.message is string && data.message.size() < 1000 &&
+             data.read is bool &&
+             data.type is string && data.type.size() < 50;
     }
-    
+
     // Notifications
     match /notifications/{notificationId} {
       allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && (
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data) && (
+        // Self-notification (e.g., reset data, task reminders)
         request.resource.data.userId == request.auth.uid ||
+        // Transfer notification: Sender must be a participant in the transfer
         (request.resource.data.type == 'transfer' && 
+         'transferId' in request.resource.data && request.resource.data.transferId is string &&
          exists(/databases/$(database)/documents/animal_transfers/$(request.resource.data.transferId)) &&
          request.auth.uid in get(/databases/$(database)/documents/animal_transfers/$(request.resource.data.transferId)).data.participants) ||
+        // Chat notification: Sender must be a participant in the chat
         (request.resource.data.type == 'chat' && 
+         'chatId' in request.resource.data && request.resource.data.chatId is string &&
          exists(/databases/$(database)/documents/chats/$(request.resource.data.chatId)) &&
          request.auth.uid in get(/databases/$(database)/documents/chats/$(request.resource.data.chatId)).data.participants)
       );
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && 
+                   request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 

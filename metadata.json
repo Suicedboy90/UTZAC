@@ -1,5 +1,5 @@
 {
   "name": "Tlanextli",
-  "description": "Plataforma de gestión ganadera con seguimiento de salud, alimentación, notificaciones inteligentes y mapas interactivos de Zacatecas.",
-  "requestFramePermissions": ["geolocation", "notifications", "camera"]
+  "description": "Plataforma de gestión ganadera con seguimiento de salud, alimentación, notificaciones inteligentes y mercado comunitario.",
+  "requestFramePermissions": ["notifications", "camera"]
 }
