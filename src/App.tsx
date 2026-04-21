@@ -2755,10 +2755,10 @@ export default function App() {
     }
 
     const animalDoc = await getDoc(doc(db, 'animals', transfer.animalId));
-    if (!animalDoc.exists() || animalDoc.data().id_propietario !== user.uid) {
+    if (!animalDoc.exists() || animalDoc.data().id_propietario !== transfer.sellerId) {
       setActiveToast({
         title: 'Error',
-        message: 'Ya no eres el propietario de este animal.',
+        message: 'El vendedor ya no es el propietario de este animal.',
         type: 'error'
       });
       setTimeout(() => setActiveToast(null), 5000);
@@ -2770,7 +2770,8 @@ export default function App() {
       const mainBatch = writeBatch(db);
       
       mainBatch.update(doc(db, 'animals', transfer.animalId), {
-        id_propietario: transfer.buyerId
+        id_propietario: transfer.buyerId,
+        id_potrero: ''
       });
 
       mainBatch.update(doc(db, 'animal_transfers', transfer.id), {
@@ -2781,26 +2782,32 @@ export default function App() {
       await mainBatch.commit();
       
       // 3. Cleanup Marketplace Offer if exists
-      const marketplaceQuery = query(collection(db, 'marketplace_offers'), where('animalId', '==', transfer.animalId));
-      const marketplaceSnapshot = await getDocs(marketplaceQuery);
-      for (const docSnap of marketplaceSnapshot.docs) {
-        await deleteDoc(doc(db, 'marketplace_offers', docSnap.id));
-      }
+      try {
+        const marketplaceQuery = query(collection(db, 'marketplace_offers'), where('animalId', '==', transfer.animalId));
+        const marketplaceSnapshot = await getDocs(marketplaceQuery);
+        for (const docSnap of marketplaceSnapshot.docs) {
+          await deleteDoc(doc(db, 'marketplace_offers', docSnap.id));
+        }
+      } catch (e) { console.warn(e); }
 
       // 3.5 Cleanup other pending/accepted transfers for this animal
-      const otherTransfersQuery = query(
-        collection(db, 'animal_transfers'), 
-        where('animalId', '==', transfer.animalId),
-        where('status', 'in', ['pending', 'accepted'])
-      );
-      const otherTransfersSnapshot = await getDocs(otherTransfersQuery);
-      for (const docSnap of otherTransfersSnapshot.docs) {
-        if (docSnap.id !== transfer.id) {
-          await updateDoc(doc(db, 'animal_transfers', docSnap.id), {
-            status: 'rejected',
-            updatedAt: serverTimestamp()
-          });
+      try {
+        const otherTransfersQuery = query(
+          collection(db, 'animal_transfers'), 
+          where('animalId', '==', transfer.animalId),
+          where('status', 'in', ['pending', 'accepted'])
+        );
+        const otherTransfersSnapshot = await getDocs(otherTransfersQuery);
+        for (const docSnap of otherTransfersSnapshot.docs) {
+          if (docSnap.id !== transfer.id) {
+            await updateDoc(doc(db, 'animal_transfers', docSnap.id), {
+              status: 'rejected',
+              updatedAt: serverTimestamp()
+            });
+          }
         }
+      } catch (e) {
+        console.warn('Could not cleanup other transfers (expected if buyer completes)', e);
       }
 
       // 4. Update History (Events) to follow the new owner
@@ -4434,12 +4441,6 @@ export default function App() {
               >
                 <div className="flex justify-between items-center px-2">
                   <h2 className="text-3xl font-black text-primary tracking-tight font-display">Más opciones</h2>
-                  <button 
-                    onClick={() => setActiveTab('settings')}
-                    className="p-3 bg-white rounded-2xl border border-gray-100 text-primary shadow-sm"
-                  >
-                    <Settings size={20} />
-                  </button>
                 </div>
 
                 <div className="space-y-8 px-2">
@@ -4847,9 +4848,6 @@ export default function App() {
                     </button>
                     <h2 className="text-3xl font-black text-primary tracking-tight font-display">Finanzas</h2>
                   </div>
-                  <button onClick={() => setIsFinanceModalOpen(true)} className="p-4 bg-primary text-white rounded-2xl shadow-lg shadow-primary/20">
-                    <Plus size={24} />
-                  </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 px-2">
                   <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
