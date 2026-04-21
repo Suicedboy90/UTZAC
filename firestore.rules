@@ -71,23 +71,13 @@ service cloud.firestore {
 
     // Helper for history migration
     function canMigrateHistory(data, newUserId) {
-      // Allow migration if there is a completed or accepted transfer for this animal to this user
-      // Supporting both 'animalId' and legacy 'id_animal' fields
-      return (
-        (('animalId' in data && data.animalId != null && 
-          exists(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + newUserId)) &&
-          get(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + newUserId)).data.status in ['accepted', 'completed'] &&
-          (request.auth.uid == get(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + newUserId)).data.sellerId ||
-           request.auth.uid == get(/databases/$(database)/documents/animal_transfers/$(data.animalId + "_" + newUserId)).data.buyerId)
-         ))
-        ||
-        (('id_animal' in data && data.id_animal != null && 
-          exists(/databases/$(database)/documents/animal_transfers/$(data.id_animal + "_" + newUserId)) &&
-          get(/databases/$(database)/documents/animal_transfers/$(data.id_animal + "_" + newUserId)).data.status in ['accepted', 'completed'] &&
-          (request.auth.uid == get(/databases/$(database)/documents/animal_transfers/$(data.id_animal + "_" + newUserId)).data.sellerId ||
-           request.auth.uid == get(/databases/$(database)/documents/animal_transfers/$(data.id_animal + "_" + newUserId)).data.buyerId)
-         ))
-      );
+      // Allow migration if the target newUserId is the CURRENT owner of the animal.
+      // We check both 'animalId' and legacy 'id_animal' fields.
+      let aId = 'animalId' in data ? data.animalId : ('id_animal' in data ? data.id_animal : null);
+      
+      return aId != null &&
+        exists(/databases/$(database)/documents/animals/$(aId)) &&
+        get(/databases/$(database)/documents/animals/$(aId)).data.id_propietario == newUserId;
     }
 
     // Health Events
@@ -187,7 +177,11 @@ service cloud.firestore {
     match /marketplace_offers/{offerId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidMarketplaceOffer(request.resource.data);
-      allow update: if isAuthenticated() && resource.data.sellerId == request.auth.uid && isValidMarketplaceOffer(request.resource.data);
+      allow update: if isAuthenticated() && (
+        resource.data.sellerId == request.auth.uid || 
+        // Allow buyers to reserve or un-reserve an offer during a transfer
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+      );
       allow delete: if isAuthenticated() && resource.data.sellerId == request.auth.uid;
     }
 

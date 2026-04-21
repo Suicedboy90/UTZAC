@@ -248,6 +248,9 @@ interface AnimalTransfer {
   sellerId: string;
   sellerName: string;
   buyerId: string;
+  buyerName?: string;
+  participants?: string[];
+  marketplaceOfferId?: string;
   price: number;
   status: 'pending' | 'accepted' | 'rejected' | 'completed';
   createdAt: any;
@@ -332,6 +335,7 @@ interface MarketplaceOffer {
   sellerId: string;
   sellerName: string;
   photoUrl?: string;
+  status?: 'active' | 'reserved';
   createdAt: any;
 }
 
@@ -2718,6 +2722,12 @@ export default function App() {
         updatedAt: serverTimestamp()
       });
 
+      if (transfer.marketplaceOfferId) {
+        await updateDoc(doc(db, 'marketplace_offers', transfer.marketplaceOfferId), {
+          status: 'active'
+        }).catch(err => console.warn('Offer might have been deleted', err));
+      }
+
       const otherPartyId = transfer.sellerId === user.uid ? transfer.buyerId : transfer.sellerId;
       await addDoc(collection(db, 'notifications'), {
         userId: otherPartyId,
@@ -2783,10 +2793,19 @@ export default function App() {
       
       // 3. Cleanup Marketplace Offer if exists
       try {
-        const marketplaceQuery = query(collection(db, 'marketplace_offers'), where('animalId', '==', transfer.animalId));
-        const marketplaceSnapshot = await getDocs(marketplaceQuery);
-        for (const docSnap of marketplaceSnapshot.docs) {
-          await deleteDoc(doc(db, 'marketplace_offers', docSnap.id));
+        if (transfer.marketplaceOfferId) {
+          await updateDoc(doc(db, 'marketplace_offers', transfer.marketplaceOfferId), {
+            status: 'sold'
+          });
+        } else {
+          // Fallback to query
+          const marketplaceQuery = query(collection(db, 'marketplace_offers'), where('animalId', '==', transfer.animalId));
+          const marketplaceSnapshot = await getDocs(marketplaceQuery);
+          for (const docSnap of marketplaceSnapshot.docs) {
+            await updateDoc(doc(db, 'marketplace_offers', docSnap.id), {
+              status: 'sold'
+            });
+          }
         }
       } catch (e) { console.warn(e); }
 
@@ -2811,39 +2830,43 @@ export default function App() {
       }
 
       // 4. Update History (Events) to follow the new owner
-      const collectionsToUpdate = ['health_events', 'feeding_records', 'reproduction_events', 'production_records', 'tasks'];
-      
-      for (const collName of collectionsToUpdate) {
-        // We fetch ALL records for this animal ID, regardless of current userId, 
-        // to ensure history from previous owners is also migrated to the new one.
-        const qByAnimalId = query(
-          collection(db, collName), 
-          where('animalId', '==', transfer.animalId)
-        );
-        const qByIdAnimal = query(
-          collection(db, collName), 
-          where('id_animal', '==', transfer.animalId)
-        );
-
-        const [snap1, snap2] = await Promise.all([getDocs(qByAnimalId), getDocs(qByIdAnimal)]);
-        const allDocs = [...snap1.docs, ...snap2.docs];
+      try {
+        const collectionsToUpdate = ['health_events', 'feeding_records', 'reproduction_events', 'production_records', 'tasks'];
         
-        // Remove duplicates if any doc appeared in both queries
-        const uniqueDocs = Array.from(new Map(allDocs.map(d => [d.id, d])).values());
+        for (const collName of collectionsToUpdate) {
+          // We fetch ALL records for this animal ID, regardless of current userId, 
+          // to ensure history from previous owners is also migrated to the new one.
+          const qByAnimalId = query(
+            collection(db, collName), 
+            where('animalId', '==', transfer.animalId)
+          );
+          const qByIdAnimal = query(
+            collection(db, collName), 
+            where('id_animal', '==', transfer.animalId)
+          );
 
-        if (uniqueDocs.length > 0) {
-          // Process in sub-batches of 500 to avoid Firestore limits
-          for (let i = 0; i < uniqueDocs.length; i += 500) {
-            const currentSubBatch = uniqueDocs.slice(i, i + 500);
-            const batch = writeBatch(db);
-            currentSubBatch.forEach((docSnap: any) => {
-              if (docSnap.data()?.userId !== transfer.buyerId) {
-                batch.update(doc(db, collName, docSnap.id), { userId: transfer.buyerId });
-              }
-            });
-            await batch.commit();
+          const [snap1, snap2] = await Promise.all([getDocs(qByAnimalId), getDocs(qByIdAnimal)]);
+          const allDocs = [...snap1.docs, ...snap2.docs];
+          
+          // Remove duplicates if any doc appeared in both queries
+          const uniqueDocs = Array.from(new Map(allDocs.map(d => [d.id, d])).values());
+
+          if (uniqueDocs.length > 0) {
+            // Process in sub-batches of 500 to avoid Firestore limits
+            for (let i = 0; i < uniqueDocs.length; i += 500) {
+              const currentSubBatch = uniqueDocs.slice(i, i + 500);
+              const batch = writeBatch(db);
+              currentSubBatch.forEach((docSnap: any) => {
+                if (docSnap.data()?.userId !== transfer.buyerId) {
+                  batch.update(doc(db, collName, docSnap.id), { userId: transfer.buyerId });
+                }
+              });
+              await batch.commit();
+            }
           }
         }
+      } catch (err) {
+        console.warn('Could not migrate all history records. Non-fatal error:', err);
       }
 
       // 5. Create finance transactions for both
@@ -3592,12 +3615,15 @@ export default function App() {
         price: offer.price,
         status: 'pending',
         participants: [offer.sellerId, user.uid],
+        marketplaceOfferId: offer.id,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
 
-      // Delete the marketplace offer as requested
-      await deleteDoc(doc(db, 'marketplace_offers', offer.id));
+      // Update the marketplace offer instead of deleting it
+      await updateDoc(doc(db, 'marketplace_offers', offer.id), {
+        status: 'reserved'
+      });
 
       await addDoc(collection(db, 'notifications'), {
         userId: offer.sellerId,
@@ -3647,6 +3673,7 @@ export default function App() {
         sellerId: user.uid,
         sellerName: userProfile.ranchName || user.displayName || 'Ganadero',
         photoUrl: animal.photoUrl || null,
+        status: 'active',
         createdAt: serverTimestamp()
       });
 
@@ -6564,7 +6591,7 @@ const CommunityView = ({
           </div>
         ) : view === 'marketplace' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {marketplaceOffers.map(offer => (
+            {marketplaceOffers.filter(offer => offer.status === 'active' || !offer.status).map(offer => (
               <div key={offer.id} className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-md transition-all group flex flex-col">
                 <div className="flex items-center gap-4 mb-6">
                   <div className="w-16 h-16 rounded-2xl bg-secondary/5 text-secondary flex items-center justify-center overflow-hidden">
@@ -6601,7 +6628,7 @@ const CommunityView = ({
                 </button>
               </div>
             ))}
-            {marketplaceOffers.length === 0 && (
+            {marketplaceOffers.filter(offer => offer.status === 'active' || !offer.status).length === 0 && (
               <div className="col-span-full text-center py-24 bg-white rounded-[2.5rem] border border-dashed border-gray-200">
                 <ShoppingBag size={48} className="mx-auto mb-4 text-gray-200" />
                 <p className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">No hay ofertas en el mercado</p>
