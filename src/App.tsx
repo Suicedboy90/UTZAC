@@ -1911,11 +1911,11 @@ const AnimalFormModal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6 bg-black/40 backdrop-blur-sm">
       <motion.div 
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="bg-white max-w-2xl w-full p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl my-4 sm:my-8 flex flex-col gap-4 sm:gap-6"
+        className="relative bg-white max-w-2xl w-full p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col gap-4 sm:gap-6 max-h-[95vh] overflow-y-auto no-scrollbar"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-[#1a1a1a]">
@@ -2405,24 +2405,35 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  const fetchAnimalHistory = useCallback(async (animalId: string) => {
+  const fetchAnimalHistory = useCallback(async (animal: Animal) => {
     if (!user) return;
     setLoadingHistory(true);
     try {
-      const [healthSnap, reproSnap, prodSnap, financeSnap, oldHealthSnap, oldReproSnap, oldProdSnap, oldFinanceSnap] = await Promise.all([
-        getDocs(query(collection(db, 'health_events'), where('animalId', '==', animalId))),
-        getDocs(query(collection(db, 'reproduction_events'), where('animalId', '==', animalId))),
-        getDocs(query(collection(db, 'production_records'), where('animalId', '==', animalId))),
-        getDocs(query(collection(db, 'finance_transactions'), where('animalId', '==', animalId))),
+      const dbPromises = [
+        getDocs(query(collection(db, 'health_events'), where('animalId', '==', animal.id))),
+        getDocs(query(collection(db, 'reproduction_events'), where('animalId', '==', animal.id))),
+        getDocs(query(collection(db, 'production_records'), where('animalId', '==', animal.id))),
+        getDocs(query(collection(db, 'finance_transactions'), where('animalId', '==', animal.id))),
         // Fallback for legacy id_animal field
-        getDocs(query(collection(db, 'health_events'), where('id_animal', '==', animalId))),
-        getDocs(query(collection(db, 'reproduction_events'), where('id_animal', '==', animalId))),
-        getDocs(query(collection(db, 'production_records'), where('id_animal', '==', animalId))),
-        getDocs(query(collection(db, 'finance_transactions'), where('id_animal', '==', animalId)))
-      ]);
+        getDocs(query(collection(db, 'health_events'), where('id_animal', '==', animal.id))),
+        getDocs(query(collection(db, 'reproduction_events'), where('id_animal', '==', animal.id))),
+        getDocs(query(collection(db, 'production_records'), where('id_animal', '==', animal.id))),
+        getDocs(query(collection(db, 'finance_transactions'), where('id_animal', '==', animal.id)))
+      ];
 
-      const mergeDocs = (snap1: any, snap2: any) => {
-        const all = [...snap1.docs, ...snap2.docs];
+      if (animal.id_potrero) {
+        dbPromises.push(getDocs(query(collection(db, 'health_events'), where('potreroId', '==', animal.id_potrero))));
+      }
+
+      const results = await Promise.all(dbPromises);
+      const [
+        healthSnap, reproSnap, prodSnap, financeSnap, 
+        oldHealthSnap, oldReproSnap, oldProdSnap, oldFinanceSnap,
+        groupHealthSnap
+      ] = results as any[];
+
+      const mergeDocs = (...snaps: any[]) => {
+        const all = snaps.filter(Boolean).flatMap(snap => snap.docs || []);
         const merged = Array.from(new Map(all.map((d: any) => [d.id, { id: d.id, ...d.data() }])).values());
         return merged.sort((a: any, b: any) => {
           const getVal = (v: any) => v?.toDate ? v.toDate().getTime() : (v ? new Date(v).getTime() : 0);
@@ -2431,7 +2442,7 @@ export default function App() {
       };
 
       setScannedHistory({
-        health: mergeDocs(healthSnap, oldHealthSnap) as HealthEvent[],
+        health: mergeDocs(healthSnap, oldHealthSnap, groupHealthSnap) as HealthEvent[],
         reproduction: mergeDocs(reproSnap, oldReproSnap) as ReproductionEvent[],
         production: mergeDocs(prodSnap, oldProdSnap) as ProductionRecord[],
         finance: mergeDocs(financeSnap, oldFinanceSnap) as FinanceTransaction[]
@@ -2463,7 +2474,7 @@ export default function App() {
       setQrAnimal(animalData);
 
       // 2. Fetch All Related Events
-      await fetchAnimalHistory(animalId);
+      await fetchAnimalHistory(animalData);
 
       setIsQrModalOpen(true);
       setIsScannerModalOpen(false);
@@ -4219,8 +4230,8 @@ export default function App() {
                         onShowQR={(e) => {
                           e.stopPropagation();
                           setQrAnimal(animal);
+                          setScannedHistory(null);
                           setIsQrModalOpen(true);
-                          fetchAnimalHistory(animal.id);
                         }}
                         onSell={(e) => {
                           e.stopPropagation();
@@ -5763,9 +5774,8 @@ const FeedingModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: ()
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-6 sm:p-8 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto no-scrollbar">
         <div className="flex justify-between items-center mb-8">
           <h3 className="text-2xl font-black text-primary tracking-tight">Registro de Alimento</h3>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X size={24} /></button>
@@ -5830,9 +5840,8 @@ const ReproductionModal = ({ isOpen, onClose, animals, onAdd }: { isOpen: boolea
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-6 sm:p-8 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto no-scrollbar">
         <div className="flex justify-between items-center mb-8">
           <h3 className="text-2xl font-black text-primary tracking-tight">Evento Reproductivo</h3>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X size={24} /></button>
@@ -5900,9 +5909,8 @@ const ProductionModal = ({ isOpen, onClose, animals, onAdd }: { isOpen: boolean,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-6 sm:p-8 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto no-scrollbar">
         <div className="flex justify-between items-center mb-8">
           <h3 className="text-2xl font-black text-primary tracking-tight">Registro de Producción</h3>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X size={24} /></button>
@@ -6009,11 +6017,10 @@ const HealthEventModal = ({ isOpen, onClose, animals, potreros = [], onAdd, init
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl overflow-hidden">
-        <div className="flex justify-between items-center mb-8">
-          <h3 className="text-2xl font-black text-primary tracking-tight">Evento de Salud</h3>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="relative bg-white w-full max-w-md rounded-[2.5rem] p-5 sm:p-8 shadow-2xl flex flex-col max-h-[95vh] overflow-y-auto no-scrollbar">
+        <div className="flex justify-between items-center mb-6 sm:mb-8">
+          <h3 className="text-xl sm:text-2xl font-black text-primary tracking-tight">Evento de Salud</h3>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X size={24} /></button>
         </div>
 
@@ -7380,10 +7387,14 @@ const QRCodeModal = ({
 
   const qrValue = `${window.location.origin}${window.location.pathname}?animalId=${animal.id}`;
 
-  const animalHealth = scannedHistory ? scannedHistory.health : healthEvents.filter(e => e.animalId === animal.id || (e as any).id_animal === animal.id);
-  const animalReproduction = scannedHistory ? scannedHistory.reproduction : reproductionEvents.filter(e => e.animalId === animal.id || (e as any).id_animal === animal.id);
-  const animalProduction = scannedHistory ? scannedHistory.production : productionRecords.filter(e => e.animalId === animal.id || (e as any).id_animal === animal.id);
-  const animalFinance = scannedHistory ? scannedHistory.finance : financeTransactions.filter(t => t.animalId === animal.id || (t as any).id_animal === animal.id);
+  const animalHealth = scannedHistory ? scannedHistory.health : (healthEvents || []).filter(e => 
+    e.animalId === animal.id || 
+    (e as any).id_animal === animal.id || 
+    (e.mode === 'grupal' && e.potreroId === animal.id_potrero && animal.id_potrero)
+  );
+  const animalReproduction = scannedHistory ? scannedHistory.reproduction : (reproductionEvents || []).filter(e => e.animalId === animal.id || (e as any).id_animal === animal.id);
+  const animalProduction = scannedHistory ? scannedHistory.production : (productionRecords || []).filter(e => e.animalId === animal.id || (e as any).id_animal === animal.id);
+  const animalFinance = scannedHistory ? scannedHistory.finance : (financeTransactions || []).filter(t => t.animalId === animal.id || (t as any).id_animal === animal.id);
 
   const handleDownloadPDF = () => {
     try {

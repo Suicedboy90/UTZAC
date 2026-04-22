@@ -17,6 +17,9 @@ export default defineConfig(({ mode }) => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['logo.png'],
+        devOptions: {
+          enabled: true
+        },
         workbox: {
           maximumFileSizeToCacheInBytes: 5000000
         },
@@ -27,10 +30,17 @@ export default defineConfig(({ mode }) => {
           theme_color: '#ffffff',
           background_color: '#ffffff',
           display: 'standalone',
+          start_url: '/',
           icons: [
             {
-              src: 'logo.png',
-              sizes: '192x192 512x512',
+              src: '/logo.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any maskable'
+            },
+            {
+              src: '/logo.png',
+              sizes: '512x512',
               type: 'image/png',
               purpose: 'any maskable'
             }

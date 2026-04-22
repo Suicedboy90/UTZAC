@@ -167,7 +167,7 @@ service cloud.firestore {
 
     // Tasks
     match /tasks/{taskId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidTask(request.resource.data);
       allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || canMigrateHistory(resource.data, request.resource.data.userId));
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
