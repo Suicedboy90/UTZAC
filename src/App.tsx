@@ -2410,15 +2410,15 @@ export default function App() {
     setLoadingHistory(true);
     try {
       const [healthSnap, reproSnap, prodSnap, financeSnap, oldHealthSnap, oldReproSnap, oldProdSnap, oldFinanceSnap] = await Promise.all([
-        getDocs(query(collection(db, 'health_events'), where('animalId', '==', animalId), orderBy('date', 'desc'))),
-        getDocs(query(collection(db, 'reproduction_events'), where('animalId', '==', animalId), orderBy('date', 'desc'))),
-        getDocs(query(collection(db, 'production_records'), where('animalId', '==', animalId), orderBy('date', 'desc'))),
-        getDocs(query(collection(db, 'finance_transactions'), where('animalId', '==', animalId), orderBy('date', 'desc'))),
+        getDocs(query(collection(db, 'health_events'), where('animalId', '==', animalId))),
+        getDocs(query(collection(db, 'reproduction_events'), where('animalId', '==', animalId))),
+        getDocs(query(collection(db, 'production_records'), where('animalId', '==', animalId))),
+        getDocs(query(collection(db, 'finance_transactions'), where('animalId', '==', animalId))),
         // Fallback for legacy id_animal field
-        getDocs(query(collection(db, 'health_events'), where('id_animal', '==', animalId), orderBy('date', 'desc'))),
-        getDocs(query(collection(db, 'reproduction_events'), where('id_animal', '==', animalId), orderBy('date', 'desc'))),
-        getDocs(query(collection(db, 'production_records'), where('id_animal', '==', animalId), orderBy('date', 'desc'))),
-        getDocs(query(collection(db, 'finance_transactions'), where('id_animal', '==', animalId), orderBy('date', 'desc')))
+        getDocs(query(collection(db, 'health_events'), where('id_animal', '==', animalId))),
+        getDocs(query(collection(db, 'reproduction_events'), where('id_animal', '==', animalId))),
+        getDocs(query(collection(db, 'production_records'), where('id_animal', '==', animalId))),
+        getDocs(query(collection(db, 'finance_transactions'), where('id_animal', '==', animalId)))
       ]);
 
       const mergeDocs = (snap1: any, snap2: any) => {
@@ -2781,7 +2781,8 @@ export default function App() {
       
       mainBatch.update(doc(db, 'animals', transfer.animalId), {
         id_propietario: transfer.buyerId,
-        id_potrero: ''
+        id_potrero: '',
+        en_venta: false
       });
 
       mainBatch.update(doc(db, 'animal_transfers', transfer.id), {
@@ -2958,10 +2959,10 @@ export default function App() {
     );
 
     const healthUnsubscribe = onSnapshot(
-      query(collection(db, 'health_events'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1000)),
+      query(collection(db, 'health_events'), where('userId', '==', user.uid), limit(1000)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HealthEvent));
-        setHealthEvents(data);
+        setHealthEvents(data.sort((a,b) => (b.date?.seconds || 0) - (a.date?.seconds || 0)));
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'health_events', auth)
     );
@@ -2975,10 +2976,10 @@ export default function App() {
     );
 
     const feedingUnsubscribe = onSnapshot(
-      query(collection(db, 'feeding_records'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1000)),
+      query(collection(db, 'feeding_records'), where('userId', '==', user.uid), limit(1000)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FeedingRecord));
-        setFeedingRecords(data);
+        setFeedingRecords(data.sort((a,b) => (b.date?.seconds || 0) - (a.date?.seconds || 0)));
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'feeding_records', auth)
     );
@@ -3030,19 +3031,19 @@ export default function App() {
     );
 
     const reproductionUnsubscribe = onSnapshot(
-      query(collection(db, 'reproduction_events'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1000)),
+      query(collection(db, 'reproduction_events'), where('userId', '==', user.uid), limit(1000)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ReproductionEvent));
-        setReproductionEvents(data);
+        setReproductionEvents(data.sort((a,b) => (b.date?.seconds || 0) - (a.date?.seconds || 0)));
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'reproduction_events', auth)
     );
 
     const productionUnsubscribe = onSnapshot(
-      query(collection(db, 'production_records'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1000)),
+      query(collection(db, 'production_records'), where('userId', '==', user.uid), limit(1000)),
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductionRecord));
-        setProductionRecords(data);
+        setProductionRecords(data.sort((a,b) => (b.date?.seconds || 0) - (a.date?.seconds || 0)));
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'production_records', auth)
     );
@@ -3086,17 +3087,19 @@ export default function App() {
     );
 
     const inventoryUnsubscribe = onSnapshot(
-      query(collection(db, 'inventory'), where('userId', '==', user.uid), orderBy('updatedAt', 'desc'), limit(200)),
+      query(collection(db, 'inventory'), where('userId', '==', user.uid), limit(200)),
       (snapshot) => {
-        setInventory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem));
+        setInventory(data.sort((a,b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)));
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'inventory', auth)
     );
 
     const tasksUnsubscribe = onSnapshot(
-      query(collection(db, 'tasks'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(200)),
+      query(collection(db, 'tasks'), where('userId', '==', user.uid), limit(200)),
       (snapshot) => {
-        setTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task)));
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
+        setTasks(data.sort((a,b) => (b.date?.seconds || 0) - (a.date?.seconds || 0)));
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'tasks', auth)
     );
@@ -3679,7 +3682,8 @@ export default function App() {
 
       // Update animal status/price
       await updateDoc(doc(db, 'animals', animal.id), {
-        precio: price
+        precio: price,
+        en_venta: true
       });
 
       setActiveToast({
