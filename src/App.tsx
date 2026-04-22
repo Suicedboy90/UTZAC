@@ -4484,6 +4484,24 @@ export default function App() {
                         </div>
                         <ChevronRight size={18} className="text-gray-300" />
                       </button>
+                      <button onClick={() => setActiveTab('inventory')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors border-b border-gray-50">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-gray-50 text-gray-600 flex items-center justify-center">
+                            <Database size={20} />
+                          </div>
+                          <span className="font-bold text-primary">Inventario</span>
+                        </div>
+                        <ChevronRight size={18} className="text-gray-300" />
+                      </button>
+                      <button onClick={() => setActiveTab('calendar')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors border-b border-gray-50">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                            <Calendar size={20} />
+                          </div>
+                          <span className="font-bold text-primary">Calendario</span>
+                        </div>
+                        <ChevronRight size={18} className="text-gray-300" />
+                      </button>
                       <button onClick={() => setActiveTab('reportes')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors border-b border-gray-50">
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
@@ -4524,6 +4542,15 @@ export default function App() {
                             <Dna size={20} />
                           </div>
                           <span className="font-bold text-primary">Reproducción</span>
+                        </div>
+                        <ChevronRight size={18} className="text-gray-300" />
+                      </button>
+                      <button onClick={() => setActiveTab('production')} className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                            <TrendingUp size={20} />
+                          </div>
+                          <span className="font-bold text-primary">Producción</span>
                         </div>
                         <ChevronRight size={18} className="text-gray-300" />
                       </button>
