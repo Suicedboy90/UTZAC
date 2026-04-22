@@ -6024,8 +6024,8 @@ const HealthEventModal = ({ isOpen, onClose, animals, potreros = [], onAdd, init
           onAdd({
             ...formData,
             mode,
-            animalName: mode === 'individual' ? (animal?.nombre || '') : undefined,
-            potreroName: mode === 'grupal' ? (potrero?.nombre || '') : undefined,
+            animalName: mode === 'individual' ? (animal?.nombre || '') : null,
+            potreroName: mode === 'grupal' ? (potrero?.nombre || '') : null,
             cost: parseFloat(formData.cost) || 0,
             date: new Date(formData.date)
           });
